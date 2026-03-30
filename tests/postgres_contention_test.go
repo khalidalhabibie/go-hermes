@@ -82,6 +82,7 @@ func TestPostgresHighFanoutCompetingTransfersRemainConsistent(t *testing.T) {
 
 	requests := make([]func() error, 0, recipientCount)
 	for i, recipientWallet := range recipients {
+		i := i
 		recipientWallet := recipientWallet
 		requests = append(requests, func() error {
 			hashValue, err := idempotency.HashPayload(map[string]interface{}{
