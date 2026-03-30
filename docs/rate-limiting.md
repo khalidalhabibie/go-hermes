@@ -61,6 +61,13 @@ The response also includes useful headers:
 - `X-RateLimit-Remaining`
 - `X-RateLimit-Reset`
 
+If Redis is unavailable or the rate-limit backend errors, the middleware currently fails open:
+
+- the request is allowed to continue
+- a warning is logged with `failure_policy=fail_open`
+
+This is an intentional availability-first choice so login and money-movement requests are not blocked by limiter backend outages. The tradeoff is reduced abuse protection during that failure window.
+
 ## Tradeoffs
 
 - the implementation is intentionally simple and readable

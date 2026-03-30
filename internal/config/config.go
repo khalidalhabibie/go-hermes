@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
+
+const minJWTSecretLength = 32
 
 type Config struct {
 	App           AppConfig
@@ -71,6 +74,7 @@ type DocsConfig struct {
 
 type ObservabilityConfig struct {
 	MetricsEnabled bool
+	MetricsToken   string
 }
 
 type WebhookConfig struct {
@@ -83,10 +87,13 @@ type WebhookConfig struct {
 }
 
 func Load() Config {
+	appEnv := getEnv("APP_ENV", "development")
+	enableAdminSeedByDefault := isDevelopmentEnv(appEnv)
+
 	return Config{
 		App: AppConfig{
 			Name: getEnv("APP_NAME", "go-hermes"),
-			Env:  getEnv("APP_ENV", "development"),
+			Env:  appEnv,
 			Port: getEnv("APP_PORT", "8080"),
 		},
 		DB: DBConfig{
@@ -119,7 +126,7 @@ func Load() Config {
 			ExpiryMinutes: getEnvAsInt("JWT_EXPIRY_MINUTES", 60),
 		},
 		Seed: SeedConfig{
-			EnableAdminSeed: getEnvAsBool("SEED_ADMIN_ENABLED", true),
+			EnableAdminSeed: getEnvAsBool("SEED_ADMIN_ENABLED", enableAdminSeedByDefault),
 			AdminName:       getEnv("SEED_ADMIN_NAME", "System Admin"),
 			AdminEmail:      getEnv("SEED_ADMIN_EMAIL", "admin@gohermes.local"),
 			AdminPassword:   getEnv("SEED_ADMIN_PASSWORD", "ChangeMe123!"),
@@ -129,6 +136,7 @@ func Load() Config {
 		},
 		Observability: ObservabilityConfig{
 			MetricsEnabled: getEnvAsBool("METRICS_ENABLED", true),
+			MetricsToken:   getEnv("METRICS_TOKEN", ""),
 		},
 		Webhook: WebhookConfig{
 			Enabled:              getEnvAsBool("WEBHOOK_ENABLED", false),
@@ -139,6 +147,22 @@ func Load() Config {
 			WorkerBatchSize:      getEnvAsInt("WEBHOOK_WORKER_BATCH_SIZE", 20),
 		},
 	}
+}
+
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.JWT.Issuer) == "" {
+		return fmt.Errorf("JWT_ISSUER must be set")
+	}
+
+	if !c.App.IsDevelopment() && isWeakJWTSecret(c.JWT.Secret) {
+		return fmt.Errorf("JWT_SECRET must be set to a non-default value with at least %d characters outside development", minJWTSecretLength)
+	}
+
+	if c.Observability.MetricsEnabled && !c.App.IsDevelopment() && strings.TrimSpace(c.Observability.MetricsToken) == "" {
+		return fmt.Errorf("METRICS_TOKEN must be set when metrics are enabled outside development")
+	}
+
+	return nil
 }
 
 func (c DBConfig) DSN() string {
@@ -156,6 +180,10 @@ func (c DBConfig) DSN() string {
 
 func (c RedisConfig) Address() string {
 	return fmt.Sprintf("%s:%s", c.Host, c.Port)
+}
+
+func (c AppConfig) IsDevelopment() bool {
+	return isDevelopmentEnv(c.Env)
 }
 
 func getEnv(key, fallback string) string {
@@ -189,4 +217,22 @@ func getEnvAsBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func isDevelopmentEnv(env string) bool {
+	return strings.EqualFold(env, "development") || strings.EqualFold(env, "dev")
+}
+
+func isWeakJWTSecret(secret string) bool {
+	secret = strings.TrimSpace(secret)
+	if len(secret) < minJWTSecretLength {
+		return true
+	}
+
+	switch strings.ToLower(secret) {
+	case "change-me", "super-secret-change-me", "dev-only-change-me", "jwt-secret", "secret", "test-secret":
+		return true
+	default:
+		return false
+	}
 }

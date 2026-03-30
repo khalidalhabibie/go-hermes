@@ -32,6 +32,9 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logger.New(cfg.App.Env)
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("invalid configuration")
+	}
 
 	db, err := database.Open(cfg.DB, log)
 	if err != nil {
@@ -61,6 +64,13 @@ func main() {
 	requestValidator := validator.New()
 	webhookService := usecase.NewWebhookService(cfg.Webhook, webhookRepo, nil, log, metricsCollector)
 
+	if cfg.App.IsDevelopment() && cfg.Seed.EnableAdminSeed {
+		log.Warn().Msg("admin seeding is enabled for development bootstrap")
+	}
+	if !cfg.App.IsDevelopment() && cfg.Seed.EnableAdminSeed {
+		log.Warn().Msg("SEED_ADMIN_ENABLED is ignored outside development")
+	}
+
 	authUsecase := usecase.NewAuthUsecase(txManager, userRepo, walletRepo, auditRepo, jwtManager)
 	userUsecase := usecase.NewUserUsecase(userRepo)
 	walletUsecase := usecase.NewWalletUsecase(walletRepo)
@@ -82,8 +92,21 @@ func main() {
 	}
 	if cfg.Observability.MetricsEnabled {
 		instrumentation.Metrics = middleware.Metrics(metricsCollector)
+		instrumentation.MetricsAuth = middleware.ProtectMetrics(cfg.Observability.MetricsToken)
 		instrumentation.MetricsEndpoint = metricsCollector.FiberHandler()
+
+		metricsEvent := log.Info().Bool("metrics_enabled", true)
+		if cfg.Observability.MetricsToken == "" {
+			metricsEvent = log.Warn().Bool("metrics_enabled", true)
+			metricsEvent.Msg("metrics endpoint is open in development because METRICS_TOKEN is not set")
+		} else {
+			metricsEvent.Str("protection", "token").Msg("metrics endpoint protection enabled")
+		}
 	}
+
+	log.Info().
+		Str("failure_policy", "fail_open").
+		Msg("rate limiter backend failures will allow requests to preserve application availability")
 
 	server := app.NewHTTPApp(cfg.App.Name, jwtManager, middleware.RequestLogger(log), httpdelivery.Handlers{
 		Auth:   handler.NewAuthHandler(authUsecase, requestValidator),
@@ -94,9 +117,9 @@ func main() {
 		Admin:  handler.NewAdminHandler(adminUsecase, reconciliationUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
-		Login:    middleware.RateLimit("login", redisLimiter, cfg.RateLimit.Login, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
-		TopUp:    middleware.RateLimit("topup", redisLimiter, cfg.RateLimit.TopUp, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
-		Transfer: middleware.RateLimit("transfer", redisLimiter, cfg.RateLimit.Transfer, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
+		Login:    middleware.RateLimit("login", redisLimiter, cfg.RateLimit.Login, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector, log),
+		TopUp:    middleware.RateLimit("topup", redisLimiter, cfg.RateLimit.TopUp, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector, log),
+		Transfer: middleware.RateLimit("transfer", redisLimiter, cfg.RateLimit.Transfer, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector, log),
 	}, instrumentation, cfg.Docs.Enabled)
 
 	go func() {
@@ -116,7 +139,7 @@ func main() {
 }
 
 func seedAdmin(ctx context.Context, cfg config.Config, txManager repository.TransactionManager, users repository.UserRepository, wallets repository.WalletRepository, audits repository.AuditLogRepository) error {
-	if !cfg.Seed.EnableAdminSeed || cfg.Seed.AdminEmail == "" || cfg.Seed.AdminPassword == "" {
+	if !cfg.App.IsDevelopment() || !cfg.Seed.EnableAdminSeed || cfg.Seed.AdminEmail == "" || cfg.Seed.AdminPassword == "" {
 		return nil
 	}
 

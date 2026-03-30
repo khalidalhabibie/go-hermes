@@ -50,6 +50,7 @@ type HarnessOptions struct {
 	TopUpRateLimit     int
 	TransferRateLimit  int
 	RateLimitWindow    time.Duration
+	MetricsToken       string
 	WebhookEnabled     bool
 	WebhookTargetURL   string
 	WebhookSecret      string
@@ -67,6 +68,12 @@ func WithRateLimit(login, topUp, transfer int, window time.Duration) HarnessOpti
 		options.TopUpRateLimit = topUp
 		options.TransferRateLimit = transfer
 		options.RateLimitWindow = window
+	}
+}
+
+func WithMetricsToken(token string) HarnessOption {
+	return func(options *HarnessOptions) {
+		options.MetricsToken = token
 	}
 }
 
@@ -129,12 +136,13 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 		Admin:  handler.NewAdminHandler(adminUsecase, reconciliationUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
-		Login:    middleware.RateLimit("login", ratelimit.NewMemoryLimiter(), options.LoginRateLimit, options.RateLimitWindow, metricsCollector),
-		TopUp:    middleware.RateLimit("topup", ratelimit.NewMemoryLimiter(), options.TopUpRateLimit, options.RateLimitWindow, metricsCollector),
-		Transfer: middleware.RateLimit("transfer", ratelimit.NewMemoryLimiter(), options.TransferRateLimit, options.RateLimitWindow, metricsCollector),
+		Login:    middleware.RateLimit("login", ratelimit.NewMemoryLimiter(), options.LoginRateLimit, options.RateLimitWindow, metricsCollector, testLogger),
+		TopUp:    middleware.RateLimit("topup", ratelimit.NewMemoryLimiter(), options.TopUpRateLimit, options.RateLimitWindow, metricsCollector, testLogger),
+		Transfer: middleware.RateLimit("transfer", ratelimit.NewMemoryLimiter(), options.TransferRateLimit, options.RateLimitWindow, metricsCollector, testLogger),
 	}, httpdelivery.Instrumentation{
 		TraceContext:    middleware.TraceContext(),
 		Metrics:         middleware.Metrics(metricsCollector),
+		MetricsAuth:     middleware.ProtectMetrics(options.MetricsToken),
 		MetricsEndpoint: metricsCollector.FiberHandler(),
 	}, false)
 

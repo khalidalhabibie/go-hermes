@@ -33,6 +33,7 @@ type RouteMiddleware struct {
 type Instrumentation struct {
 	TraceContext    fiber.Handler
 	Metrics         fiber.Handler
+	MetricsAuth     fiber.Handler
 	MetricsEndpoint fiber.Handler
 }
 
@@ -52,7 +53,11 @@ func RegisterRoutes(app *fiber.App, handlers Handlers, jwtManager *auth.JWTManag
 
 	app.Get("/health", handlers.Health.Check)
 	if instrumentation.MetricsEndpoint != nil {
-		app.Get("/metrics", instrumentation.MetricsEndpoint)
+		if instrumentation.MetricsAuth != nil {
+			app.Get("/metrics", instrumentation.MetricsAuth, instrumentation.MetricsEndpoint)
+		} else {
+			app.Get("/metrics", instrumentation.MetricsEndpoint)
+		}
 	}
 
 	if docsEnabled {

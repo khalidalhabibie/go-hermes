@@ -153,6 +153,8 @@ Metrics: http://localhost:8080/metrics
 Health:  http://localhost:8080/health
 ```
 
+In development, `/metrics` stays open unless you set `METRICS_TOKEN`. Outside development, the API fails fast if metrics are enabled without that token.
+
 This mode is best for local debugging and fast iteration with native Go tooling.
 
 ### Option 2: Run Full Stack In Docker
@@ -176,6 +178,8 @@ Swagger: http://localhost:8080/swagger
 Metrics: http://localhost:8080/metrics
 Health:  http://localhost:8080/health
 ```
+
+When `APP_ENV` is not `development`, scrape `/metrics` with `Authorization: Bearer <METRICS_TOKEN>` or `X-Metrics-Token: <METRICS_TOKEN>`.
 
 ## Environment Variables
 
@@ -210,11 +214,19 @@ WEBHOOK_MAX_RETRY=3
 WEBHOOK_RETRY_INTERVAL_SECONDS=30
 
 METRICS_ENABLED=true
+METRICS_TOKEN=
 
 SEED_ADMIN_ENABLED=true
 SEED_ADMIN_EMAIL=admin@gohermes.local
 SEED_ADMIN_PASSWORD=ChangeMe123!
 ```
+
+Operational defaults:
+
+- outside development, startup fails if `JWT_SECRET` is empty, uses a known placeholder, or is shorter than 32 characters
+- JWT parsing enforces the configured `JWT_ISSUER`
+- admin seeding only runs in development, even if `SEED_ADMIN_ENABLED=true` is set elsewhere
+- when metrics are enabled outside development, `METRICS_TOKEN` is required and protects `GET /metrics`
 
 ## Core Endpoints
 
@@ -310,6 +322,7 @@ Behavior:
 - caller-aware, using authenticated user identity where available and IP fallback otherwise
 - returns HTTP `429` with `RATE_LIMIT_EXCEEDED`
 - emits standard rate-limit headers
+- fails open if Redis rate-limit checks error, and logs that policy explicitly so request availability wins over accidental denial
 
 Details: [docs/rate-limiting.md](docs/rate-limiting.md)
 
@@ -338,6 +351,8 @@ The service includes a practical baseline for local and CI visibility:
 - `traceparent` correlation into `trace_id`
 - Prometheus-compatible metrics at `GET /metrics`
 - health checks covering PostgreSQL and Redis
+
+Outside development, metrics scraping requires `METRICS_TOKEN`.
 
 Details: [docs/observability.md](docs/observability.md)
 
@@ -370,7 +385,9 @@ The test strategy is layered:
 Common commands:
 
 ```bash
+make lint
 make test
+make test-race
 make test-unit
 make test-integration
 ```
@@ -403,8 +420,10 @@ For deeper reasoning behind idempotency, locking, sequence flow, and ledger mode
 
 GitHub Actions runs:
 
+- `golangci-lint`
 - `go mod tidy`
 - `go test ./...`
+- `go test -race ./...`
 
 The workflow provisions PostgreSQL for the Postgres-backed integration suite.
 
