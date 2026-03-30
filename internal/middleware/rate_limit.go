@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"go-hermes/internal/pkg/apiresponse"
+	"go-hermes/internal/pkg/metrics"
 	"go-hermes/internal/pkg/ratelimit"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Duration) fiber.Handler {
+func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Duration, collector *metrics.Collector) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if limiter == nil || limit <= 0 {
 			return c.Next()
@@ -32,6 +33,7 @@ func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Du
 		c.Set("X-RateLimit-Reset", result.ResetAt.UTC().Format(time.RFC3339))
 
 		if !result.Allowed {
+			collector.IncrementRateLimitExceeded(name)
 			return c.Status(fiber.StatusTooManyRequests).JSON(apiresponse.Error("rate limit exceeded", "RATE_LIMIT_EXCEEDED", []map[string]string{
 				{"field": name, "message": "too many requests"},
 			}))

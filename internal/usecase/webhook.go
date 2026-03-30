@@ -13,6 +13,7 @@ import (
 
 	"go-hermes/internal/config"
 	"go-hermes/internal/entity"
+	"go-hermes/internal/pkg/metrics"
 	"go-hermes/internal/repository"
 
 	"github.com/google/uuid"
@@ -43,10 +44,11 @@ type WebhookService struct {
 	repository repository.WebhookDeliveryRepository
 	client     *http.Client
 	log        zerolog.Logger
+	metrics    *metrics.Collector
 	queue      chan uuid.UUID
 }
 
-func NewWebhookService(cfg config.WebhookConfig, repository repository.WebhookDeliveryRepository, client *http.Client, log zerolog.Logger) *WebhookService {
+func NewWebhookService(cfg config.WebhookConfig, repository repository.WebhookDeliveryRepository, client *http.Client, log zerolog.Logger, collector *metrics.Collector) *WebhookService {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
@@ -61,6 +63,7 @@ func NewWebhookService(cfg config.WebhookConfig, repository repository.WebhookDe
 		repository: repository,
 		client:     client,
 		log:        log,
+		metrics:    collector,
 		queue:      make(chan uuid.UUID, queueSize*2),
 	}
 }
@@ -134,6 +137,7 @@ func (s *WebhookService) createDelivery(ctx context.Context, eventType string, t
 		Str("transaction_ref", delivery.TransactionRef).
 		Str("target_url", delivery.TargetURL).
 		Msg("webhook delivery created")
+	s.metrics.ObserveWebhookDelivery(delivery.EventType, "created")
 
 	return delivery, nil
 }
@@ -246,6 +250,7 @@ func (s *WebhookService) ProcessDelivery(ctx context.Context, deliveryID uuid.UU
 		Str("transaction_ref", delivery.TransactionRef).
 		Int("status_code", response.StatusCode).
 		Msg("webhook delivery succeeded")
+	s.metrics.ObserveWebhookDelivery(delivery.EventType, "success")
 
 	return nil
 }
@@ -282,6 +287,11 @@ func (s *WebhookService) markFailure(ctx context.Context, delivery *entity.Webho
 		Int("retry_count", delivery.RetryCount).
 		Int("status_code", statusCode).
 		Msg("webhook delivery failed")
+	if delivery.Status == entity.WebhookDeliveryStatusFailed {
+		s.metrics.ObserveWebhookDelivery(delivery.EventType, "failed")
+	} else {
+		s.metrics.ObserveWebhookDelivery(delivery.EventType, "retry_scheduled")
+	}
 
 	return nil
 }

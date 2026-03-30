@@ -96,7 +96,7 @@ func (u *AuthUsecase) Register(ctx context.Context, req RegisterRequest) (*Regis
 			CreatedAt:   time.Now(),
 		})
 	}); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+		if repository.IsUniqueViolation(err) {
 			return nil, apperror.Conflict("email already registered")
 		}
 		return nil, apperror.Internal(err)

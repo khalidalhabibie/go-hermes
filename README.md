@@ -1,6 +1,6 @@
 # go-hermes
 
-`go-hermes` is a production-minded digital wallet backend written in Go. It demonstrates a modular Fiber API with PostgreSQL, Redis, GORM, JWT authentication, idempotent money movement, immutable ledger entries, rate limiting, audit trails, webhook delivery with retry, Swagger docs, Dockerized local setup, and focused automated tests.
+`go-hermes` is a production-minded digital wallet backend written in Go. It demonstrates a modular Fiber API with PostgreSQL, Redis, GORM, JWT authentication, idempotent money movement, immutable ledger entries, rate limiting, audit trails, webhook delivery with retry, Prometheus-friendly metrics, Swagger docs, Dockerized local setup, and focused automated tests.
 
 ## Features
 
@@ -11,7 +11,7 @@
 - Redis-backed rate limiting for login and money-movement endpoints
 - Audit logs for sensitive actions and admin reads
 - Webhook delivery records, async processing, and retry support for successful transaction events
-- Structured logging, request ID propagation, recovery middleware, and health checks
+- Structured logging, request/trace correlation, Prometheus metrics, recovery middleware, and health checks
 - PostgreSQL schema migration with `golang-migrate`
 - Dockerized local stack for app, database, and Redis
 
@@ -32,6 +32,7 @@ The service follows a modular clean-ish architecture:
 
 Detailed architecture notes, ERD, sequence flows, and design decisions are documented in [architecture.md](/home/themisteriousone/Code/go-herems/docs/architecture.md).
 Rate limiting is documented in [rate-limiting.md](/home/themisteriousone/Code/go-herems/docs/rate-limiting.md), and webhook delivery behavior is documented in [webhooks.md](/home/themisteriousone/Code/go-herems/docs/webhooks.md).
+Operational visibility is summarized in [observability.md](/home/themisteriousone/Code/go-herems/docs/observability.md).
 
 ## Folder Structure
 
@@ -94,6 +95,12 @@ make run
 http://localhost:8080/swagger
 ```
 
+6. Inspect metrics if needed:
+
+```text
+http://localhost:8080/metrics
+```
+
 This mode is useful when you want:
 
 - fast local iteration with Go tooling on your host machine
@@ -120,6 +127,7 @@ Open:
 
 ```text
 http://localhost:8080/swagger
+http://localhost:8080/metrics
 ```
 
 ## Docker Compose
@@ -170,6 +178,12 @@ Webhook delivery is persistence-backed and retryable:
 - failures move to `RETRYING`
 - max retry exhaustion moves the record to `FAILED`
 
+Observability additions:
+
+- `GET /metrics` exposes Prometheus-compatible metrics
+- request logs now include `request_id` and `trace_id` when `traceparent` is present
+- webhook lifecycle and rate-limit rejections are exported as counters
+
 Admin webhook endpoints:
 
 - `GET /api/v1/admin/webhooks`
@@ -200,6 +214,13 @@ Run only integration-style HTTP tests:
 
 ```bash
 make test-integration
+```
+
+Run only Postgres-backed integration tests:
+
+```bash
+export TEST_DATABASE_DSN='host=localhost port=5432 user=postgres password=postgres dbname=go_hermes sslmode=disable TimeZone=UTC'
+make test-postgres-integration
 ```
 
 Detailed testing notes and tradeoffs are documented in [testing.md](/home/themisteriousone/Code/go-herems/docs/testing.md).
@@ -233,6 +254,7 @@ Important values:
 - `RATE_LIMIT_TRANSFER=20`
 - `WEBHOOK_ENABLED=false`
 - `WEBHOOK_TARGET_URL=`
+- `METRICS_ENABLED=true`
 - `SEED_ADMIN_EMAIL=admin@gohermes.local`
 - `SEED_ADMIN_PASSWORD=ChangeMe123!`
 
@@ -294,10 +316,13 @@ curl -X POST http://localhost:8080/api/v1/transfers \
 - Top up and transfer execute inside DB transactions
 - Wallet rows are locked with deterministic ordering to reduce deadlocks
 - Ledger entries are append-only and never updated
+- Database-level `CHECK` constraints backstop critical invariants such as positive amounts, valid enum states, and valid transaction shapes
 - Idempotency records use `(idempotency_key, user_id, endpoint)` uniqueness
 - Rate limiting is Redis-backed to work consistently across app instances
 - Webhook delivery is decoupled from the critical transaction response path
 - Webhook retries are persisted so failed callbacks remain inspectable and recoverable
+- Admin seeding now runs transactionally to avoid partial bootstrap state
+- Prometheus-compatible metrics make request, webhook, and rate-limit behavior visible during local runs and CI
 - Swagger is shipped as a manual OpenAPI file to keep local setup lightweight
 
 For deeper reasoning behind idempotency, locking, and ledger modeling, see [architecture.md](/home/themisteriousone/Code/go-herems/docs/architecture.md).

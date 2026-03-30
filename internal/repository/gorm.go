@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"time"
 
@@ -383,8 +382,4 @@ func (r *GormWebhookDeliveryRepository) ListDue(ctx context.Context, now time.Ti
 		Limit(limit).
 		Find(&deliveries).Error
 	return deliveries, err
-}
-
-func IsNotFound(err error) bool {
-	return errors.Is(err, gorm.ErrRecordNotFound)
 }

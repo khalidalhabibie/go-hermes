@@ -27,13 +27,21 @@ func RequestLogger(log zerolog.Logger) fiber.Handler {
 			}
 		}
 
-		event.
+		event = event.
 			Str("request_id", requestid.Get(c)).
 			Str("method", c.Method()).
 			Str("path", c.OriginalURL()).
 			Int("status", statusCode).
-			Dur("duration", duration).
-			Msg("http request")
+			Dur("duration", duration)
+
+		if traceID, ok := c.Locals(ContextTraceID).(string); ok && traceID != "" {
+			event = event.Str("trace_id", traceID)
+		}
+		if userID, ok := c.Locals(ContextUserID).(string); ok && userID != "" {
+			event = event.Str("user_id", userID)
+		}
+
+		event.Msg("http request")
 
 		return err
 	}

@@ -9,13 +9,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func NewHTTPApp(appName string, jwtManager *auth.JWTManager, requestLogger fiber.Handler, handlers httpdelivery.Handlers, routeMiddleware httpdelivery.RouteMiddleware, docsEnabled bool) *fiber.App {
+func NewHTTPApp(appName string, jwtManager *auth.JWTManager, requestLogger fiber.Handler, handlers httpdelivery.Handlers, routeMiddleware httpdelivery.RouteMiddleware, instrumentation httpdelivery.Instrumentation, docsEnabled bool) *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      appName,
 		ErrorHandler: ErrorHandler,
 	})
 
-	httpdelivery.RegisterRoutes(app, handlers, jwtManager, requestLogger, routeMiddleware, docsEnabled)
+	httpdelivery.RegisterRoutes(app, handlers, jwtManager, requestLogger, routeMiddleware, instrumentation, docsEnabled)
 	return app
 }
 

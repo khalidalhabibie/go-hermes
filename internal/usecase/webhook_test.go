@@ -32,7 +32,7 @@ func TestWebhookRetryBehaviorOnFailedDelivery(t *testing.T) {
 		MaxRetry:             3,
 		RetryIntervalSeconds: 1,
 		WorkerBatchSize:      10,
-	}, repos.Webhooks, server.Client(), zerolog.Nop())
+	}, repos.Webhooks, server.Client(), zerolog.Nop(), nil)
 
 	transaction := testkit.NewTransactionBuilder().Build()
 	wallet := testkit.NewWalletBuilder().Build()
@@ -70,7 +70,7 @@ func TestWebhookEventuallySucceedsAfterRetry(t *testing.T) {
 		MaxRetry:             3,
 		RetryIntervalSeconds: 1,
 		WorkerBatchSize:      10,
-	}, repos.Webhooks, server.Client(), zerolog.Nop())
+	}, repos.Webhooks, server.Client(), zerolog.Nop(), nil)
 
 	transaction := testkit.NewTransactionBuilder().Build()
 	wallet := testkit.NewWalletBuilder().Build()
