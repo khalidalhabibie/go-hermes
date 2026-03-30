@@ -44,12 +44,16 @@ The project is intentionally small enough to run locally, but structured to show
 
 - JWT authentication with `user` and `admin` roles
 - one wallet per user, created automatically at registration
-- top up and transfer flows protected by idempotency keys
+- top up and transfer flows execute inside database transactions and are protected by idempotency keys
+- wallet balance updates use deterministic row-level locking to reduce deadlock risk and double-spend races
 - transaction records plus immutable ledger entries for every balance mutation
+- admin reconciliation checks wallet, ledger, and transaction consistency from persisted state under explicit model assumptions
+- Postgres-backed tests cover row locking, contention, rollback behavior, and explicit corrupted-state reconciliation cases
 - Redis-backed rate limiting on login and money-movement endpoints
 - webhook delivery persistence with retry and async processing
 - audit logging for important user and admin actions
 - Prometheus-compatible metrics and structured logs with request correlation
+- fail-fast runtime hardening for JWT configuration, metrics exposure, and admin seeding outside development
 - SQL migrations and Dockerized local setup
 
 ## Architecture
@@ -227,6 +231,7 @@ Operational defaults:
 - JWT parsing enforces the configured `JWT_ISSUER`
 - admin seeding only runs in development, even if `SEED_ADMIN_ENABLED=true` is set elsewhere
 - when metrics are enabled outside development, `METRICS_TOKEN` is required and protects `GET /metrics`
+- rate limiter backend errors are handled explicitly with a documented `fail_open` policy
 
 ## Core Endpoints
 
@@ -358,11 +363,19 @@ Details: [docs/observability.md](docs/observability.md)
 
 ## Reconciliation
 
-Admin users can run a reconciliation report to verify persisted balances and transaction structure against ledger history.
+Admin users can run a reconciliation report to check persisted balances and transaction structure against ledger history.
+
+This checker assumes:
+
+- wallets start at balance `0`
+- every balance mutation is represented by append-only ledger entries
 
 The report checks:
 
 - wallet balance equals ledger-derived balance
+- the first ledger entry starts from the expected wallet genesis balance
+- each ledger entry balance delta matches its entry type and amount
+- each wallet ledger chain remains continuous from the first entry onward
 - top up and transfer transactions have the expected ledger shape
 - orphan ledger entries are detected
 - ledger and transaction amounts agree
@@ -379,8 +392,10 @@ The test strategy is layered:
 
 - unit tests for use cases and core business rules
 - integration-style HTTP tests using in-memory repositories
-- Postgres-backed integration tests for locking, transactionality, and migration compatibility
-- reconciliation-focused tests for wallet drift and ledger/transaction invariant violations, including explicit corrupted-state cases against PostgreSQL
+- Postgres-backed integration tests for row locking, transactionality, rollback behavior, and idempotency under contention
+- Postgres-backed reconciliation tests for wallet drift and explicit corrupted-state cases such as orphan entries, missing transfer legs, and amount mismatches
+
+The strongest correctness evidence in this repo comes from the Postgres-backed suite. The in-memory tests provide fast request and use-case coverage, but they do not replace database-backed validation of locking and persisted-state reconciliation.
 
 Common commands:
 
@@ -429,6 +444,8 @@ The workflow provisions PostgreSQL for the Postgres-backed integration suite.
 
 ## Current Limitations
 
+- Reconciliation is a practical consistency checker, not a formal proof system
+- The reconciliation model assumes wallet history starts from balance `0` and does not cover imported opening balances or ledger backfills
 - Swagger UI currently loads assets from a public CDN
 - Webhook processing is in-process, not a distributed job system
 - There is no refresh-token or session revocation flow yet
