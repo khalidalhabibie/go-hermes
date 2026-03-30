@@ -12,6 +12,7 @@ The service exposes a REST API for:
 - top up and internal transfer
 - transaction and ledger history
 - admin audit and webhook inspection
+- admin reconciliation reporting
 
 The project is intentionally small enough to run locally, but structured to show senior backend concerns:
 
@@ -82,6 +83,7 @@ Supporting documentation:
 - [Rate Limiting](docs/rate-limiting.md)
 - [Webhooks](docs/webhooks.md)
 - [Observability](docs/observability.md)
+- [Reconciliation](docs/reconciliation.md)
 - [Testing](docs/testing.md)
 - [OpenAPI Spec](docs/openapi.yaml)
 
@@ -237,6 +239,7 @@ SEED_ADMIN_PASSWORD=ChangeMe123!
 ### Admin
 
 - `GET /api/v1/admin/audit-logs`
+- `GET /api/v1/admin/reconciliation`
 - `GET /api/v1/admin/transactions`
 - `GET /api/v1/admin/webhooks`
 - `GET /api/v1/admin/webhooks/:id`
@@ -338,6 +341,23 @@ The service includes a practical baseline for local and CI visibility:
 
 Details: [docs/observability.md](docs/observability.md)
 
+## Reconciliation
+
+Admin users can run a reconciliation report to verify persisted balances and transaction structure against ledger history.
+
+The report checks:
+
+- wallet balance equals ledger-derived balance
+- top up and transfer transactions have the expected ledger shape
+- orphan ledger entries are detected
+- ledger and transaction amounts agree
+
+Endpoint:
+
+- `GET /api/v1/admin/reconciliation`
+
+Details: [docs/reconciliation.md](docs/reconciliation.md)
+
 ## Testing
 
 The test strategy is layered:
@@ -345,6 +365,7 @@ The test strategy is layered:
 - unit tests for use cases and core business rules
 - integration-style HTTP tests using in-memory repositories
 - Postgres-backed integration tests for locking, transactionality, and migration compatibility
+- reconciliation-focused tests for wallet drift and ledger/transaction invariant violations
 
 Common commands:
 
@@ -372,6 +393,7 @@ More detail: [docs/testing.md](docs/testing.md)
 - Idempotency is enforced with `(idempotency_key, user_id, endpoint)` uniqueness plus payload hashing
 - Webhook delivery is decoupled from the request critical path
 - Database constraints backstop core domain invariants, not just application code
+- Reconciliation can prove wallet, ledger, and transaction invariants from persisted state
 - Redis is used for practical cross-instance rate limiting
 - Admin seeding is transactional to avoid partial bootstrap state
 

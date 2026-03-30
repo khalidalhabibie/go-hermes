@@ -12,11 +12,15 @@ import (
 )
 
 type AdminHandler struct {
-	admin *usecase.AdminUsecase
+	admin          *usecase.AdminUsecase
+	reconciliation *usecase.ReconciliationUsecase
 }
 
-func NewAdminHandler(admin *usecase.AdminUsecase) *AdminHandler {
-	return &AdminHandler{admin: admin}
+func NewAdminHandler(admin *usecase.AdminUsecase, reconciliation *usecase.ReconciliationUsecase) *AdminHandler {
+	return &AdminHandler{
+		admin:          admin,
+		reconciliation: reconciliation,
+	}
 }
 
 func (h *AdminHandler) AuditLogs(c *fiber.Ctx) error {
@@ -52,6 +56,14 @@ func (h *AdminHandler) Webhooks(c *fiber.Ctx) error {
 
 func (h *AdminHandler) Webhook(c *fiber.Ctx) error {
 	result, err := h.admin.GetWebhook(c.Context(), c.Locals(middleware.ContextUserID).(string), c.Params("id"))
+	if err != nil {
+		return httpresponse.Error(c, err)
+	}
+	return httpresponse.Success(c, fiber.StatusOK, result, nil)
+}
+
+func (h *AdminHandler) Reconciliation(c *fiber.Ctx) error {
+	result, err := h.reconciliation.Run(c.Context(), c.Locals(middleware.ContextUserID).(string))
 	if err != nil {
 		return httpresponse.Error(c, err)
 	}

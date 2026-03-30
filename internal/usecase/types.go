@@ -125,6 +125,50 @@ type WebhookDeliveryResponse struct {
 	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
+type ReconciliationSummaryResponse struct {
+	WalletsChecked             int `json:"wallets_checked"`
+	TransactionsChecked        int `json:"transactions_checked"`
+	LedgerEntriesChecked       int `json:"ledger_entries_checked"`
+	WalletBalanceMismatchCount int `json:"wallet_balance_mismatch_count"`
+	TransactionIssueCount      int `json:"transaction_issue_count"`
+	LedgerIssueCount           int `json:"ledger_issue_count"`
+	IssueCount                 int `json:"issue_count"`
+}
+
+type ReconciliationWalletIssueResponse struct {
+	WalletID         string `json:"wallet_id"`
+	UserID           string `json:"user_id"`
+	StoredBalance    int64  `json:"stored_balance"`
+	DerivedBalance   int64  `json:"derived_balance"`
+	LedgerEntryCount int    `json:"ledger_entry_count"`
+	Reason           string `json:"reason"`
+}
+
+type ReconciliationTransactionIssueResponse struct {
+	TransactionID  string   `json:"transaction_id"`
+	TransactionRef string   `json:"transaction_ref"`
+	Type           string   `json:"type"`
+	Amount         int64    `json:"amount"`
+	LedgerEntryIDs []string `json:"ledger_entry_ids"`
+	Reason         string   `json:"reason"`
+}
+
+type ReconciliationLedgerIssueResponse struct {
+	LedgerEntryID string `json:"ledger_entry_id"`
+	TransactionID string `json:"transaction_id"`
+	WalletID      string `json:"wallet_id"`
+	Reason        string `json:"reason"`
+}
+
+type ReconciliationResponse struct {
+	CheckedAt     time.Time                                `json:"checked_at"`
+	Healthy       bool                                     `json:"healthy"`
+	Summary       ReconciliationSummaryResponse            `json:"summary"`
+	Wallets       []ReconciliationWalletIssueResponse      `json:"wallets"`
+	Transactions  []ReconciliationTransactionIssueResponse `json:"transactions"`
+	LedgerEntries []ReconciliationLedgerIssueResponse      `json:"ledger_entries"`
+}
+
 type OperationResult struct {
 	StatusCode int
 	Body       []byte

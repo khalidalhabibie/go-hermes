@@ -556,6 +556,47 @@ func (r *MemoryHealthRepository) Ping(_ context.Context) error {
 	return nil
 }
 
+type MemoryReconciliationRepository struct {
+	store *MemoryStore
+}
+
+func NewMemoryReconciliationRepository(store *MemoryStore) *MemoryReconciliationRepository {
+	return &MemoryReconciliationRepository{store: store}
+}
+
+func (r *MemoryReconciliationRepository) ListWallets(_ context.Context) ([]entity.Wallet, error) {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	items := make([]entity.Wallet, 0, len(r.store.wallets))
+	for _, walletID := range sortedWalletIDs(r.store.wallets) {
+		items = append(items, r.store.wallets[walletID])
+	}
+	return items, nil
+}
+
+func (r *MemoryReconciliationRepository) ListTransactions(_ context.Context) ([]entity.Transaction, error) {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	items := make([]entity.Transaction, 0, len(r.store.transactionOrder))
+	for _, transactionID := range r.store.transactionOrder {
+		items = append(items, r.store.transactions[transactionID])
+	}
+	return items, nil
+}
+
+func (r *MemoryReconciliationRepository) ListLedgerEntries(_ context.Context) ([]entity.LedgerEntry, error) {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	items := make([]entity.LedgerEntry, 0, len(r.store.ledgerOrder))
+	for _, entryID := range r.store.ledgerOrder {
+		items = append(items, r.store.ledgerEntries[entryID])
+	}
+	return items, nil
+}
+
 type MemoryWebhookDeliveryRepository struct {
 	store *MemoryStore
 }
@@ -660,32 +701,45 @@ func (r *MemoryWebhookDeliveryRepository) ListDue(_ context.Context, now time.Ti
 }
 
 type MemoryRepositories struct {
-	Store        *MemoryStore
-	TxManager    repository.TransactionManager
-	Users        repository.UserRepository
-	Wallets      repository.WalletRepository
-	Transactions repository.TransactionRepository
-	Ledgers      repository.LedgerRepository
-	Idempotency  repository.IdempotencyRepository
-	Audits       repository.AuditLogRepository
-	Health       repository.HealthRepository
-	Webhooks     repository.WebhookDeliveryRepository
+	Store          *MemoryStore
+	TxManager      repository.TransactionManager
+	Users          repository.UserRepository
+	Wallets        repository.WalletRepository
+	Transactions   repository.TransactionRepository
+	Ledgers        repository.LedgerRepository
+	Idempotency    repository.IdempotencyRepository
+	Audits         repository.AuditLogRepository
+	Health         repository.HealthRepository
+	Reconciliation repository.ReconciliationRepository
+	Webhooks       repository.WebhookDeliveryRepository
 }
 
 func NewMemoryRepositories() *MemoryRepositories {
 	store := NewMemoryStore()
 	return &MemoryRepositories{
-		Store:        store,
-		TxManager:    &MemoryTransactionManager{},
-		Users:        NewMemoryUserRepository(store),
-		Wallets:      NewMemoryWalletRepository(store),
-		Transactions: NewMemoryTransactionRepository(store),
-		Ledgers:      NewMemoryLedgerRepository(store),
-		Idempotency:  NewMemoryIdempotencyRepository(store),
-		Audits:       NewMemoryAuditLogRepository(store),
-		Health:       &MemoryHealthRepository{},
-		Webhooks:     NewMemoryWebhookDeliveryRepository(store),
+		Store:          store,
+		TxManager:      &MemoryTransactionManager{},
+		Users:          NewMemoryUserRepository(store),
+		Wallets:        NewMemoryWalletRepository(store),
+		Transactions:   NewMemoryTransactionRepository(store),
+		Ledgers:        NewMemoryLedgerRepository(store),
+		Idempotency:    NewMemoryIdempotencyRepository(store),
+		Audits:         NewMemoryAuditLogRepository(store),
+		Health:         &MemoryHealthRepository{},
+		Reconciliation: NewMemoryReconciliationRepository(store),
+		Webhooks:       NewMemoryWebhookDeliveryRepository(store),
 	}
+}
+
+func sortedWalletIDs(wallets map[uuid.UUID]entity.Wallet) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(wallets))
+	for walletID := range wallets {
+		ids = append(ids, walletID)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i].String() < ids[j].String()
+	})
+	return ids
 }
 
 var (
@@ -697,5 +751,6 @@ var (
 	_ repository.IdempotencyRepository     = (*MemoryIdempotencyRepository)(nil)
 	_ repository.AuditLogRepository        = (*MemoryAuditLogRepository)(nil)
 	_ repository.HealthRepository          = (*MemoryHealthRepository)(nil)
+	_ repository.ReconciliationRepository  = (*MemoryReconciliationRepository)(nil)
 	_ repository.WebhookDeliveryRepository = (*MemoryWebhookDeliveryRepository)(nil)
 )

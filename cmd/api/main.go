@@ -46,6 +46,7 @@ func main() {
 	idempotencyRepo := repository.NewIdempotencyRepository(db)
 	auditRepo := repository.NewAuditLogRepository(db)
 	healthRepo := repository.NewHealthRepository(db)
+	reconciliationRepo := repository.NewReconciliationRepository(db)
 	webhookRepo := repository.NewWebhookDeliveryRepository(db)
 
 	redis, err := redisclient.NewClient(cfg.Redis, log)
@@ -65,6 +66,7 @@ func main() {
 	walletUsecase := usecase.NewWalletUsecase(walletRepo)
 	transactionUsecase := usecase.NewTransactionUsecase(txManager, walletRepo, transactionRepo, ledgerRepo, idempotencyRepo, auditRepo, webhookService)
 	adminUsecase := usecase.NewAdminUsecase(auditRepo, transactionRepo, webhookRepo)
+	reconciliationUsecase := usecase.NewReconciliationUsecase(reconciliationRepo, auditRepo)
 	healthUsecase := usecase.NewHealthUsecase(repository.NewCompositeHealthRepository(healthRepo, repository.NewRedisHealthRepository(redis)))
 
 	if err := seedAdmin(context.Background(), cfg, txManager, userRepo, walletRepo, auditRepo); err != nil {
@@ -89,7 +91,7 @@ func main() {
 		Wallet: handler.NewWalletHandler(walletUsecase, transactionUsecase, requestValidator),
 		Tx:     handler.NewTransactionHandler(transactionUsecase, requestValidator),
 		Ledger: handler.NewLedgerHandler(transactionUsecase),
-		Admin:  handler.NewAdminHandler(adminUsecase),
+		Admin:  handler.NewAdminHandler(adminUsecase, reconciliationUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
 		Login:    middleware.RateLimit("login", redisLimiter, cfg.RateLimit.Login, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),

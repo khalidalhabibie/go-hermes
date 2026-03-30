@@ -57,6 +57,12 @@ type HealthRepository interface {
 	Ping(ctx context.Context) error
 }
 
+type ReconciliationRepository interface {
+	ListWallets(ctx context.Context) ([]entity.Wallet, error)
+	ListTransactions(ctx context.Context) ([]entity.Transaction, error)
+	ListLedgerEntries(ctx context.Context) ([]entity.LedgerEntry, error)
+}
+
 type WebhookDeliveryFilter struct {
 	EventType      string
 	Status         string
