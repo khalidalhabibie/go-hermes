@@ -268,6 +268,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditLogListResponse'
+  /api/v1/admin/reconciliation:
+    get:
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      summary: Run reconciliation report
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationSuccessResponse'
   /api/v1/admin/transactions:
     get:
       tags: [Admin]
@@ -459,6 +472,58 @@ components:
         delivered_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ReconciliationSummary:
+      type: object
+      properties:
+        wallets_checked: { type: integer }
+        transactions_checked: { type: integer }
+        ledger_entries_checked: { type: integer }
+        wallet_balance_mismatch_count: { type: integer }
+        transaction_issue_count: { type: integer }
+        ledger_issue_count: { type: integer }
+        issue_count: { type: integer }
+    ReconciliationWalletIssue:
+      type: object
+      properties:
+        wallet_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        stored_balance: { type: integer, format: int64 }
+        derived_balance: { type: integer, format: int64 }
+        ledger_entry_count: { type: integer }
+        reason: { type: string }
+    ReconciliationTransactionIssue:
+      type: object
+      properties:
+        transaction_id: { type: string, format: uuid }
+        transaction_ref: { type: string }
+        type: { type: string }
+        amount: { type: integer, format: int64 }
+        ledger_entry_ids:
+          type: array
+          items: { type: string, format: uuid }
+        reason: { type: string }
+    ReconciliationLedgerIssue:
+      type: object
+      properties:
+        ledger_entry_id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        wallet_id: { type: string, format: uuid }
+        reason: { type: string }
+    ReconciliationReport:
+      type: object
+      properties:
+        checked_at: { type: string, format: date-time }
+        healthy: { type: boolean }
+        summary: { $ref: '#/components/schemas/ReconciliationSummary' }
+        wallets:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationWalletIssue' }
+        transactions:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationTransactionIssue' }
+        ledger_entries:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationLedgerIssue' }
     Meta:
       type: object
       properties:
@@ -600,3 +665,9 @@ components:
           type: array
           items: { $ref: '#/components/schemas/WebhookDelivery' }
         meta: { $ref: '#/components/schemas/Meta' }
+    ReconciliationSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/ReconciliationReport' }
+        meta: { nullable: true }

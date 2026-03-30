@@ -4,7 +4,7 @@
 
 `go-hermes` uses a layered test strategy designed to give strong confidence in money movement behavior without overcomplicating the local developer experience.
 
-There are two main categories of automated tests:
+There are three main categories of automated tests:
 
 - Unit tests for use cases and business rules
 - Integration-style HTTP tests that exercise routing, middleware, validation, auth, and handlers end-to-end using an isolated in-memory repository layer
@@ -44,6 +44,7 @@ The HTTP tests exercise the application as a running API:
 - webhook delivery record creation after top up
 - webhook delivery record creation after transfer
 - webhook retry then success behavior
+- admin reconciliation report healthy path
 - validation failures for malformed input
 - missing idempotency key handling
 - missing JWT handling
@@ -59,7 +60,12 @@ The Postgres-backed suite verifies behaviors that the in-memory test double cann
 - `LockByIDs` returns a deterministic order suitable for deadlock reduction
 - transfer updates remain atomic against a real PostgreSQL database
 - failed transfers roll back balances, transactions, and ledger writes
+- concurrent top ups using the same idempotency key create only one transaction and one ledger entry
+- concurrent transfers using the same idempotency key create only one transaction and two ledger entries
+- duplicate concurrent requests do not mutate balances twice
+- competing transfers on the same wallet serialize correctly and leave exactly one successful mutation when funds are insufficient for both
 - reciprocal transfers complete successfully under real row locking
+- reconciliation logic can detect wallet drift, orphan ledger entries, and broken transaction ledger shapes
 
 ## Critical Flows Covered
 
@@ -75,6 +81,11 @@ The most important trust-sensitive flows are intentionally tested from multiple 
   replay behavior with same payload
   conflict behavior with different payload
   assertions that balance, transactions, and ledger counts do not change twice
+  Postgres-backed proof that concurrent retries with the same key still mutate state only once
+- concurrency:
+  Postgres-backed proof that same-wallet contention does not overdraw balances
+  rollback proof that failed contenders do not leave partial transactions or partial ledger writes
+  reciprocal transfer proof under real row locking
 - webhooks:
   delivery record creation after successful balance mutation
   retry and eventual success behavior for outbound callback processing
@@ -97,6 +108,7 @@ Tradeoffs:
 - these tests do not validate real PostgreSQL behavior such as row locking semantics, SQL constraints, or migration compatibility
 - GORM-specific query behavior is not deeply exercised by the test suite
 - the Postgres-backed integration suite is opt-in through `TEST_DATABASE_DSN` to keep local setup lightweight
+- the strongest concurrency guarantees in this repository are intentionally proven only in the Postgres-backed suite because they depend on real transaction and lock behavior
 
 ## What Remains Untested
 
@@ -106,6 +118,7 @@ The following areas still deserve deeper coverage in a larger production system:
 - failure-path tests for audit log persistence and partial infrastructure failures
 - chaos-style tests for Redis outages during rate limit checks
 - end-to-end webhook delivery against a real downstream stub in CI
+- scheduled reconciliation runs and alerting on failed reports
 
 ## Running Tests Locally
 

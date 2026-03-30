@@ -107,6 +107,7 @@ func RegisterRoutes(app *fiber.App, handlers Handlers, jwtManager *auth.JWTManag
 
 	admin := protected.Group("/admin", middleware.RequireRole(entity.RoleAdmin))
 	admin.Get("/audit-logs", handlers.Admin.AuditLogs)
+	admin.Get("/reconciliation", handlers.Admin.Reconciliation)
 	admin.Get("/transactions", handlers.Admin.Transactions)
 	admin.Get("/webhooks", handlers.Admin.Webhooks)
 	admin.Get("/webhooks/:id", handlers.Admin.Webhook)

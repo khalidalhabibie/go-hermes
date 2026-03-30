@@ -64,6 +64,63 @@ func TestPostgresTransferIsAtomicAndCreatesLedgerEntries(t *testing.T) {
 	assertTableCount(t, db, &entity.LedgerEntry{}, 2)
 }
 
+func TestPostgresConcurrentTopUpsWithSameIdempotencyKeyMutateOnce(t *testing.T) {
+	db := testkit.NewPostgresTestDB(t).DB
+	transactionUsecase, wallet, _ := newPostgresTransactionUsecase(t, db, 1_000, 0)
+
+	hashValue, err := idempotency.HashPayload(map[string]interface{}{
+		"amount": int64(2_000),
+	})
+	require.NoError(t, err)
+
+	results := make(chan *usecase.OperationResult, 2)
+	errs := runConcurrent(t, 2, func() error {
+		result, err := transactionUsecase.TopUp(context.Background(), usecase.TopUpRequest{
+			UserID:         wallet.UserID.String(),
+			Amount:         2_000,
+			IdempotencyKey: "pg-concurrent-topup-same-key",
+			RequestHash:    hashValue,
+		})
+		if err == nil {
+			results <- result
+		}
+		return err
+	})
+	close(results)
+
+	replayCount := 0
+	nonReplayCount := 0
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	for result := range results {
+		require.NotNil(t, result)
+		if result.Replay {
+			replayCount++
+		} else {
+			nonReplayCount++
+		}
+	}
+	require.Equal(t, 1, nonReplayCount)
+	require.Equal(t, 1, replayCount)
+
+	replayResult, err := transactionUsecase.TopUp(context.Background(), usecase.TopUpRequest{
+		UserID:         wallet.UserID.String(),
+		Amount:         2_000,
+		IdempotencyKey: "pg-concurrent-topup-same-key",
+		RequestHash:    hashValue,
+	})
+	require.NoError(t, err)
+	if replayResult.Replay {
+		replayCount++
+	}
+	require.GreaterOrEqual(t, replayCount, 2)
+
+	verifyWalletBalance(t, db, wallet.ID.String(), 3_000)
+	assertTableCount(t, db, &entity.Transaction{}, 1)
+	assertTableCount(t, db, &entity.LedgerEntry{}, 1)
+}
+
 func TestPostgresTransferRollbackOnInsufficientBalance(t *testing.T) {
 	db := testkit.NewPostgresTestDB(t).DB
 	transactionUsecase, senderWallet, recipientWallet := newPostgresTransactionUsecase(t, db, 1_000, 1_000)
@@ -89,6 +146,145 @@ func TestPostgresTransferRollbackOnInsufficientBalance(t *testing.T) {
 	verifyWalletBalance(t, db, recipientWallet.ID.String(), 1_000)
 	assertTableCount(t, db, &entity.Transaction{}, 0)
 	assertTableCount(t, db, &entity.LedgerEntry{}, 0)
+}
+
+func TestPostgresConcurrentTransfersWithSameIdempotencyKeyMutateOnce(t *testing.T) {
+	db := testkit.NewPostgresTestDB(t).DB
+	transactionUsecase, senderWallet, recipientWallet := newPostgresTransactionUsecase(t, db, 10_000, 1_000)
+
+	hashValue, err := idempotency.HashPayload(map[string]interface{}{
+		"recipient_wallet_id": recipientWallet.ID.String(),
+		"amount":              int64(3_000),
+	})
+	require.NoError(t, err)
+
+	results := make(chan *usecase.OperationResult, 2)
+	errs := runConcurrent(t, 2, func() error {
+		result, err := transactionUsecase.Transfer(context.Background(), usecase.TransferRequest{
+			UserID:            senderWallet.UserID.String(),
+			RecipientWalletID: recipientWallet.ID.String(),
+			Amount:            3_000,
+			IdempotencyKey:    "pg-concurrent-transfer-same-key",
+			RequestHash:       hashValue,
+		})
+		if err == nil {
+			results <- result
+		}
+		return err
+	})
+	close(results)
+
+	replayCount := 0
+	nonReplayCount := 0
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	for result := range results {
+		require.NotNil(t, result)
+		if result.Replay {
+			replayCount++
+		} else {
+			nonReplayCount++
+		}
+	}
+	require.Equal(t, 1, nonReplayCount)
+	require.Equal(t, 1, replayCount)
+
+	verifyWalletBalance(t, db, senderWallet.ID.String(), 7_000)
+	verifyWalletBalance(t, db, recipientWallet.ID.String(), 4_000)
+	assertTableCount(t, db, &entity.Transaction{}, 1)
+	assertTableCount(t, db, &entity.LedgerEntry{}, 2)
+}
+
+func TestPostgresConcurrentTransfersCompetingOnSameWalletRemainConsistent(t *testing.T) {
+	db := testkit.NewPostgresTestDB(t).DB
+
+	txManager := repository.NewTransactionManager(db)
+	userRepo := repository.NewUserRepository(db)
+	walletRepo := repository.NewWalletRepository(db)
+	transactionRepo := repository.NewTransactionRepository(db)
+	ledgerRepo := repository.NewLedgerRepository(db)
+	idempotencyRepo := repository.NewIdempotencyRepository(db)
+	auditRepo := repository.NewAuditLogRepository(db)
+
+	senderUser, _ := testkit.NewUserBuilder().WithEmail("competing-sender@example.com").Build(t)
+	recipientOneUser, _ := testkit.NewUserBuilder().WithEmail("competing-recipient-1@example.com").Build(t)
+	recipientTwoUser, _ := testkit.NewUserBuilder().WithEmail("competing-recipient-2@example.com").Build(t)
+	senderWallet := testkit.NewWalletBuilder().WithUserID(senderUser.ID).WithBalance(5_000).Build()
+	recipientOneWallet := testkit.NewWalletBuilder().WithUserID(recipientOneUser.ID).WithBalance(0).Build()
+	recipientTwoWallet := testkit.NewWalletBuilder().WithUserID(recipientTwoUser.ID).WithBalance(0).Build()
+
+	require.NoError(t, userRepo.Create(context.Background(), senderUser))
+	require.NoError(t, userRepo.Create(context.Background(), recipientOneUser))
+	require.NoError(t, userRepo.Create(context.Background(), recipientTwoUser))
+	require.NoError(t, walletRepo.Create(context.Background(), senderWallet))
+	require.NoError(t, walletRepo.Create(context.Background(), recipientOneWallet))
+	require.NoError(t, walletRepo.Create(context.Background(), recipientTwoWallet))
+
+	transactionUsecase := usecase.NewTransactionUsecase(
+		txManager,
+		walletRepo,
+		transactionRepo,
+		ledgerRepo,
+		idempotencyRepo,
+		auditRepo,
+		&usecase.NoopWebhookService{},
+	)
+
+	successes := 0
+	errs := runConcurrentWithResults(t, []func() error{
+		func() error {
+			hashValue, err := idempotency.HashPayload(map[string]interface{}{
+				"recipient_wallet_id": recipientOneWallet.ID.String(),
+				"amount":              int64(3_000),
+			})
+			if err != nil {
+				return err
+			}
+			_, err = transactionUsecase.Transfer(context.Background(), usecase.TransferRequest{
+				UserID:            senderWallet.UserID.String(),
+				RecipientWalletID: recipientOneWallet.ID.String(),
+				Amount:            3_000,
+				IdempotencyKey:    "pg-competing-transfer-1",
+				RequestHash:       hashValue,
+			})
+			return err
+		},
+		func() error {
+			hashValue, err := idempotency.HashPayload(map[string]interface{}{
+				"recipient_wallet_id": recipientTwoWallet.ID.String(),
+				"amount":              int64(3_000),
+			})
+			if err != nil {
+				return err
+			}
+			_, err = transactionUsecase.Transfer(context.Background(), usecase.TransferRequest{
+				UserID:            senderWallet.UserID.String(),
+				RecipientWalletID: recipientTwoWallet.ID.String(),
+				Amount:            3_000,
+				IdempotencyKey:    "pg-competing-transfer-2",
+				RequestHash:       hashValue,
+			})
+			return err
+		},
+	})
+
+	for _, err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		require.Contains(t, err.Error(), "insufficient balance")
+	}
+	require.Equal(t, 1, successes)
+
+	verifyWalletBalance(t, db, senderWallet.ID.String(), 2_000)
+
+	recipientOneAfter := getWalletBalance(t, db, recipientOneWallet.ID.String())
+	recipientTwoAfter := getWalletBalance(t, db, recipientTwoWallet.ID.String())
+	require.Equal(t, int64(3_000), recipientOneAfter+recipientTwoAfter)
+	assertTableCount(t, db, &entity.Transaction{}, 1)
+	assertTableCount(t, db, &entity.LedgerEntry{}, 2)
 }
 
 func TestPostgresReciprocalTransfersCompleteWithoutDeadlock(t *testing.T) {
@@ -156,6 +352,37 @@ func TestPostgresReciprocalTransfersCompleteWithoutDeadlock(t *testing.T) {
 	assertTableCount(t, db, &entity.LedgerEntry{}, 4)
 }
 
+func runConcurrent(t *testing.T, count int, fn func() error) []error {
+	t.Helper()
+
+	fns := make([]func() error, 0, count)
+	for i := 0; i < count; i++ {
+		fns = append(fns, fn)
+	}
+	return runConcurrentWithResults(t, fns)
+}
+
+func runConcurrentWithResults(t *testing.T, fns []func() error) []error {
+	t.Helper()
+
+	start := make(chan struct{})
+	results := make([]error, len(fns))
+	var wg sync.WaitGroup
+	wg.Add(len(fns))
+
+	for i, fn := range fns {
+		go func(index int, call func() error) {
+			defer wg.Done()
+			<-start
+			results[index] = call()
+		}(i, fn)
+	}
+
+	close(start)
+	wg.Wait()
+	return results
+}
+
 func newPostgresTransactionUsecase(t *testing.T, db *gorm.DB, senderBalance, recipientBalance int64) (*usecase.TransactionUsecase, *entity.Wallet, *entity.Wallet) {
 	t.Helper()
 
@@ -194,6 +421,14 @@ func verifyWalletBalance(t *testing.T, db *gorm.DB, walletID string, expected in
 	var wallet entity.Wallet
 	require.NoError(t, db.WithContext(context.Background()).Where("id = ?", walletID).First(&wallet).Error)
 	require.Equal(t, expected, wallet.Balance)
+}
+
+func getWalletBalance(t *testing.T, db *gorm.DB, walletID string) int64 {
+	t.Helper()
+
+	var wallet entity.Wallet
+	require.NoError(t, db.WithContext(context.Background()).Where("id = ?", walletID).First(&wallet).Error)
+	return wallet.Balance
 }
 
 func assertTableCount(t *testing.T, db *gorm.DB, model interface{}, expected int64) {

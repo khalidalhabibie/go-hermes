@@ -25,17 +25,18 @@ import (
 )
 
 type TestHarness struct {
-	App             *fiber.App
-	Repos           *MemoryRepositories
-	JWTManager      *auth.JWTManager
-	AuthUsecase     *usecase.AuthUsecase
-	UserUsecase     *usecase.UserUsecase
-	WalletUsecase   *usecase.WalletUsecase
-	TransactionUC   *usecase.TransactionUsecase
-	AdminUsecase    *usecase.AdminUsecase
-	HealthUsecase   *usecase.HealthUsecase
-	WebhookService  *usecase.WebhookService
-	RequestValidate *validator.Validator
+	App              *fiber.App
+	Repos            *MemoryRepositories
+	JWTManager       *auth.JWTManager
+	AuthUsecase      *usecase.AuthUsecase
+	UserUsecase      *usecase.UserUsecase
+	WalletUsecase    *usecase.WalletUsecase
+	TransactionUC    *usecase.TransactionUsecase
+	AdminUsecase     *usecase.AdminUsecase
+	ReconciliationUC *usecase.ReconciliationUsecase
+	HealthUsecase    *usecase.HealthUsecase
+	WebhookService   *usecase.WebhookService
+	RequestValidate  *validator.Validator
 }
 
 type SeededUser struct {
@@ -116,6 +117,7 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 	walletUsecase := usecase.NewWalletUsecase(repos.Wallets)
 	transactionUsecase := usecase.NewTransactionUsecase(repos.TxManager, repos.Wallets, repos.Transactions, repos.Ledgers, repos.Idempotency, repos.Audits, webhookService)
 	adminUsecase := usecase.NewAdminUsecase(repos.Audits, repos.Transactions, repos.Webhooks)
+	reconciliationUsecase := usecase.NewReconciliationUsecase(repos.Reconciliation, repos.Audits)
 	healthUsecase := usecase.NewHealthUsecase(repos.Health)
 
 	appInstance := app.NewHTTPApp("go-hermes-test", jwtManager, middleware.RequestLogger(testLogger), httpdelivery.Handlers{
@@ -124,7 +126,7 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 		Wallet: handler.NewWalletHandler(walletUsecase, transactionUsecase, validate),
 		Tx:     handler.NewTransactionHandler(transactionUsecase, validate),
 		Ledger: handler.NewLedgerHandler(transactionUsecase),
-		Admin:  handler.NewAdminHandler(adminUsecase),
+		Admin:  handler.NewAdminHandler(adminUsecase, reconciliationUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
 		Login:    middleware.RateLimit("login", ratelimit.NewMemoryLimiter(), options.LoginRateLimit, options.RateLimitWindow, metricsCollector),
@@ -141,17 +143,18 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 	}
 
 	return &TestHarness{
-		App:             appInstance,
-		Repos:           repos,
-		JWTManager:      jwtManager,
-		AuthUsecase:     authUsecase,
-		UserUsecase:     userUsecase,
-		WalletUsecase:   walletUsecase,
-		TransactionUC:   transactionUsecase,
-		AdminUsecase:    adminUsecase,
-		HealthUsecase:   healthUsecase,
-		WebhookService:  webhookService,
-		RequestValidate: validate,
+		App:              appInstance,
+		Repos:            repos,
+		JWTManager:       jwtManager,
+		AuthUsecase:      authUsecase,
+		UserUsecase:      userUsecase,
+		WalletUsecase:    walletUsecase,
+		TransactionUC:    transactionUsecase,
+		AdminUsecase:     adminUsecase,
+		ReconciliationUC: reconciliationUsecase,
+		HealthUsecase:    healthUsecase,
+		WebhookService:   webhookService,
+		RequestValidate:  validate,
 	}
 }
 

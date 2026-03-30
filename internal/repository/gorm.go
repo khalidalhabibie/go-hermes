@@ -321,6 +321,38 @@ func (r *GormHealthRepository) Ping(ctx context.Context) error {
 	return sqlDB.PingContext(ctx)
 }
 
+type GormReconciliationRepository struct {
+	baseRepository
+}
+
+func NewReconciliationRepository(db *gorm.DB) *GormReconciliationRepository {
+	return &GormReconciliationRepository{baseRepository{db: db}}
+}
+
+func (r *GormReconciliationRepository) ListWallets(ctx context.Context) ([]entity.Wallet, error) {
+	var wallets []entity.Wallet
+	err := r.dbFromContext(ctx).
+		Order("created_at ASC, id ASC").
+		Find(&wallets).Error
+	return wallets, err
+}
+
+func (r *GormReconciliationRepository) ListTransactions(ctx context.Context) ([]entity.Transaction, error) {
+	var transactions []entity.Transaction
+	err := r.dbFromContext(ctx).
+		Order("created_at ASC, id ASC").
+		Find(&transactions).Error
+	return transactions, err
+}
+
+func (r *GormReconciliationRepository) ListLedgerEntries(ctx context.Context) ([]entity.LedgerEntry, error) {
+	var entries []entity.LedgerEntry
+	err := r.dbFromContext(ctx).
+		Order("created_at ASC, id ASC").
+		Find(&entries).Error
+	return entries, err
+}
+
 type GormWebhookDeliveryRepository struct {
 	baseRepository
 }
