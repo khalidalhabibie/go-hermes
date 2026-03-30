@@ -161,6 +161,42 @@ func TestReconciliationDetectsMismatchOrphanAndBrokenTransactionShape(t *testing
 	require.True(t, containsLedgerIssue(report.LedgerEntries, "orphaned from any transaction"))
 }
 
+func TestReconciliationDetectsInvalidFirstLedgerEntryGenesis(t *testing.T) {
+	reconciliationUsecase, _, repos := newReconciliationUsecaseForTest()
+	admin := seedAdminActor(t, repos)
+
+	user, _ := testkit.NewUserBuilder().WithEmail("wallet-genesis@example.com").Build(t)
+	wallet := testkit.NewWalletBuilder().WithUserID(user.ID).WithBalance(1000).Build()
+	require.NoError(t, repos.Users.Create(context.Background(), user))
+	require.NoError(t, repos.Wallets.Create(context.Background(), wallet))
+
+	transaction := testkit.NewTransactionBuilder().
+		WithType(entity.TransactionTypeTopUp).
+		WithDestinationWalletID(wallet.ID).
+		WithInitiatedByUserID(user.ID).
+		WithAmount(1000).
+		Build()
+	require.NoError(t, repos.Transactions.Create(context.Background(), transaction))
+
+	require.NoError(t, repos.Ledgers.CreateMany(context.Background(), []entity.LedgerEntry{
+		{
+			ID:            uuid.New(),
+			TransactionID: transaction.ID,
+			WalletID:      wallet.ID,
+			EntryType:     entity.LedgerEntryTypeCredit,
+			Amount:        1000,
+			BalanceBefore: 100,
+			BalanceAfter:  1100,
+			CreatedAt:     time.Now(),
+		},
+	}))
+
+	report, err := reconciliationUsecase.Run(context.Background(), admin.ID.String())
+	require.NoError(t, err)
+	require.False(t, report.Healthy)
+	require.True(t, containsLedgerIssue(report.LedgerEntries, "first ledger entry must start from wallet genesis balance 0"))
+}
+
 func containsWalletIssue(issues []usecase.ReconciliationWalletIssueResponse, walletID, reason string) bool {
 	for _, issue := range issues {
 		if issue.WalletID == walletID && strings.Contains(issue.Reason, reason) {

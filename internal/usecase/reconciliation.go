@@ -14,6 +14,8 @@ import (
 	"gorm.io/datatypes"
 )
 
+const walletGenesisBalance int64 = 0
+
 type ReconciliationUsecase struct {
 	reconciliation repository.ReconciliationRepository
 	audits         repository.AuditLogRepository
@@ -122,22 +124,15 @@ func reconcileState(wallets []entity.Wallet, transactions []entity.Transaction, 
 		entries := append([]entity.LedgerEntry(nil), ledgersByWallet[wallet.ID]...)
 		sortLedgerEntries(entries)
 
+		report.LedgerEntries = append(report.LedgerEntries, validateWalletLedgerChain(wallet, entries)...)
+
 		derivedBalance := int64(0)
-		for i, entry := range entries {
+		for _, entry := range entries {
 			switch entry.EntryType {
 			case entity.LedgerEntryTypeCredit:
 				derivedBalance += entry.Amount
 			case entity.LedgerEntryTypeDebit:
 				derivedBalance -= entry.Amount
-			}
-
-			if i > 0 && entries[i-1].BalanceAfter != entry.BalanceBefore {
-				report.LedgerEntries = append(report.LedgerEntries, ReconciliationLedgerIssueResponse{
-					LedgerEntryID: entry.ID.String(),
-					TransactionID: entry.TransactionID.String(),
-					WalletID:      entry.WalletID.String(),
-					Reason:        "ledger balance chain is broken for this wallet",
-				})
 			}
 		}
 
@@ -179,6 +174,29 @@ func reconcileState(wallets []entity.Wallet, transactions []entity.Transaction, 
 	report.Healthy = report.Summary.IssueCount == 0
 
 	return report
+}
+
+func validateWalletLedgerChain(wallet entity.Wallet, entries []entity.LedgerEntry) []ReconciliationLedgerIssueResponse {
+	issues := make([]ReconciliationLedgerIssueResponse, 0)
+	if len(entries) == 0 {
+		return issues
+	}
+
+	expectedBefore := walletGenesisBalance
+	for i, entry := range entries {
+		if i == 0 {
+			if entry.BalanceBefore != expectedBefore {
+				issues = append(issues, newLedgerIssue(entry, "first ledger entry must start from wallet genesis balance 0"))
+			}
+		} else {
+			expectedBefore = entries[i-1].BalanceAfter
+			if entry.BalanceBefore != expectedBefore {
+				issues = append(issues, newLedgerIssue(entry, "ledger balance chain is broken for this wallet"))
+			}
+		}
+	}
+
+	return issues
 }
 
 func validateLedgerEntryMath(entry entity.LedgerEntry) string {
@@ -283,6 +301,15 @@ func newTransactionIssue(transaction entity.Transaction, entries []entity.Ledger
 		Amount:         transaction.Amount,
 		LedgerEntryIDs: ledgerEntryIDs,
 		Reason:         reason,
+	}
+}
+
+func newLedgerIssue(entry entity.LedgerEntry, reason string) ReconciliationLedgerIssueResponse {
+	return ReconciliationLedgerIssueResponse{
+		LedgerEntryID: entry.ID.String(),
+		TransactionID: entry.TransactionID.String(),
+		WalletID:      entry.WalletID.String(),
+		Reason:        reason,
 	}
 }
 
