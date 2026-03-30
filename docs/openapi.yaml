@@ -1,0 +1,602 @@
+openapi: 3.0.3
+info:
+  title: go-hermes Wallet API
+  version: 1.0.0
+  description: Portfolio-grade digital wallet backend built with Go, Fiber, PostgreSQL, and GORM.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Health
+  - name: Auth
+  - name: User
+  - name: Wallet
+  - name: Transfer
+  - name: Transaction
+  - name: Ledger
+  - name: Admin
+  - name: Webhook
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMapResponse'
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterSuccessResponse'
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginSuccessResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/users/me:
+    get:
+      tags: [User]
+      security:
+        - bearerAuth: []
+      summary: Get current user
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSuccessResponse'
+  /api/v1/wallets/me:
+    get:
+      tags: [Wallet]
+      security:
+        - bearerAuth: []
+      summary: Get current wallet
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletSuccessResponse'
+  /api/v1/wallets/me/balance:
+    get:
+      tags: [Wallet]
+      security:
+        - bearerAuth: []
+      summary: Get wallet balance
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceSuccessResponse'
+  /api/v1/wallets/me/top-up:
+    post:
+      tags: [Wallet]
+      security:
+        - bearerAuth: []
+      summary: Top up wallet
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopUpRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopUpSuccessResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/transfers:
+    post:
+      tags: [Transfer]
+      security:
+        - bearerAuth: []
+      summary: Transfer between wallets
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferSuccessResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/transactions/me:
+    get:
+      tags: [Transaction]
+      security:
+        - bearerAuth: []
+      summary: List my transactions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+  /api/v1/transactions/{id}:
+    get:
+      tags: [Transaction]
+      security:
+        - bearerAuth: []
+      summary: Get transaction by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionSuccessResponse'
+  /api/v1/ledgers/me:
+    get:
+      tags: [Ledger]
+      security:
+        - bearerAuth: []
+      summary: List my ledger entries
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerListResponse'
+  /api/v1/ledgers/transactions/{transactionId}:
+    get:
+      tags: [Ledger]
+      security:
+        - bearerAuth: []
+      summary: List ledger entries by transaction
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerEntriesResponse'
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      summary: List audit logs
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+  /api/v1/admin/transactions:
+    get:
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      summary: List all transactions
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+  /api/v1/admin/webhooks:
+    get:
+      tags: [Webhook]
+      security:
+        - bearerAuth: []
+      summary: List webhook deliveries
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: event_type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: transaction_ref
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookListResponse'
+  /api/v1/admin/webhooks/{id}:
+    get:
+      tags: [Webhook]
+      security:
+        - bearerAuth: []
+      summary: Get webhook delivery by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSuccessResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Page:
+      in: query
+      name: page
+      schema:
+        type: integer
+        default: 1
+    Limit:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        default: 10
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    TopUpRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount: { type: integer, format: int64, minimum: 1 }
+        description: { type: string }
+    TransferRequest:
+      type: object
+      required: [recipient_wallet_id, amount]
+      properties:
+        recipient_wallet_id: { type: string, format: uuid }
+        amount: { type: integer, format: int64, minimum: 1 }
+        description: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string }
+        created_at: { type: string, format: date-time }
+    Wallet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        balance: { type: integer, format: int64 }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Balance:
+      type: object
+      properties:
+        wallet_id: { type: string, format: uuid }
+        balance: { type: integer, format: int64 }
+        currency: { type: string }
+        updated_at: { type: string }
+    Transaction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        transaction_ref: { type: string }
+        type: { type: string }
+        status: { type: string }
+        source_wallet_id: { type: string, format: uuid, nullable: true }
+        destination_wallet_id: { type: string, format: uuid, nullable: true }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        idempotency_key: { type: string }
+        initiated_by_user_id: { type: string, format: uuid }
+        description: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LedgerEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        wallet_id: { type: string, format: uuid }
+        entry_type: { type: string }
+        amount: { type: integer, format: int64 }
+        balance_before: { type: integer, format: int64 }
+        balance_after: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid, nullable: true }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid, nullable: true }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event_type: { type: string }
+        transaction_id: { type: string, format: uuid, nullable: true }
+        transaction_ref: { type: string }
+        target_url: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+        status: { type: string }
+        retry_count: { type: integer }
+        max_retry: { type: integer }
+        last_error: { type: string, nullable: true }
+        last_http_status: { type: integer, nullable: true }
+        next_retry_at: { type: string, format: date-time, nullable: true }
+        delivered_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Meta:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer, format: int64 }
+        total_pages: { type: integer }
+    ErrorResponse:
+      type: object
+      properties:
+        message: { type: string }
+        error_code: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    SuccessMapResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          nullable: true
+    RegisterSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+            wallet: { $ref: '#/components/schemas/Wallet' }
+        meta:
+          nullable: true
+    LoginSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            access_token: { type: string }
+            expires_at: { type: string, format: date-time }
+            user: { $ref: '#/components/schemas/User' }
+        meta:
+          nullable: true
+    UserSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/User' }
+        meta: { nullable: true }
+    WalletSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/Wallet' }
+        meta: { nullable: true }
+    BalanceSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/Balance' }
+        meta: { nullable: true }
+    TopUpSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            transaction: { $ref: '#/components/schemas/Transaction' }
+            wallet: { $ref: '#/components/schemas/Wallet' }
+        meta: { nullable: true }
+    TransferSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            transaction: { $ref: '#/components/schemas/Transaction' }
+            source_wallet: { $ref: '#/components/schemas/Wallet' }
+            destination_wallet: { $ref: '#/components/schemas/Wallet' }
+        meta: { nullable: true }
+    TransactionSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/Transaction' }
+        meta: { nullable: true }
+    TransactionListResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    LedgerEntriesResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerEntry' }
+        meta: { nullable: true }
+    LedgerListResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerEntry' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    AuditLogListResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLog' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    WebhookSuccessResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data: { $ref: '#/components/schemas/WebhookDelivery' }
+        meta: { nullable: true }
+    WebhookListResponse:
+      type: object
+      properties:
+        message: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/WebhookDelivery' }
+        meta: { $ref: '#/components/schemas/Meta' }

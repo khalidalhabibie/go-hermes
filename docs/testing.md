@@ -1,0 +1,131 @@
+# Testing Strategy
+
+## Overview
+
+`go-hermes` uses a layered test strategy designed to give strong confidence in money movement behavior without overcomplicating the local developer experience.
+
+There are two main categories of automated tests:
+
+- Unit tests for use cases and business rules
+- Integration-style HTTP tests that exercise routing, middleware, validation, auth, and handlers end-to-end using an isolated in-memory repository layer
+
+## What Is Covered
+
+### Unit Tests
+
+The unit test suite focuses on the highest-risk business logic:
+
+- register success
+- register duplicate email
+- login success
+- login invalid password
+- get current user
+- get wallet details
+- top up success
+- top up invalid amount
+- top up idempotency replay with same payload
+- top up idempotency conflict with different payload
+- transfer success
+- transfer insufficient balance
+- transfer to same wallet
+- transfer invalid recipient wallet
+- transfer invalid amount
+
+### Integration-Style HTTP Tests
+
+The HTTP tests exercise the application as a running API:
+
+- register -> login -> get wallet
+- top up flow end-to-end
+- transfer flow end-to-end
+- transaction listing flow
+- rate limit exceeded response
+- webhook delivery record creation after top up
+- webhook delivery record creation after transfer
+- webhook retry then success behavior
+- validation failures for malformed input
+- missing idempotency key handling
+- missing JWT handling
+- invalid JWT handling
+- forbidden admin access for normal users
+- resource isolation for transaction detail access
+
+## Critical Flows Covered
+
+The most important trust-sensitive flows are intentionally tested from multiple angles:
+
+- top up:
+  unit coverage for business rules and idempotency
+  HTTP coverage for request validation and end-to-end behavior
+- transfer:
+  unit coverage for balance checks and recipient validation
+  HTTP coverage for real route + auth + response behavior
+- idempotency:
+  replay behavior with same payload
+  conflict behavior with different payload
+  assertions that balance, transactions, and ledger counts do not change twice
+- webhooks:
+  delivery record creation after successful balance mutation
+  retry and eventual success behavior for outbound callback processing
+- rate limiting:
+  explicit HTTP coverage for `429` responses on sensitive endpoints
+
+## Test Approach And Tradeoffs
+
+The integration-style tests use an in-memory repository implementation instead of a real Postgres database.
+
+This choice keeps tests:
+
+- fast
+- deterministic
+- easy to run in any environment
+- independent of Docker or external services
+
+Tradeoffs:
+
+- these tests do not validate real PostgreSQL behavior such as row locking semantics, SQL constraints, or migration compatibility
+- GORM-specific query behavior is not deeply exercised by the test suite
+- a future improvement would be to add a dedicated Postgres-backed integration suite for repository and migration verification
+
+## What Remains Untested
+
+The following areas still deserve deeper coverage in a larger production system:
+
+- repository integration tests against real PostgreSQL
+- migration smoke tests in CI
+- concurrency tests around transfer contention and row locking
+- admin endpoint positive-path authorization tests
+- failure-path tests for audit log persistence and partial infrastructure failures
+
+## Running Tests Locally
+
+Run all tests:
+
+```bash
+make test
+```
+
+Run unit tests only:
+
+```bash
+make test-unit
+```
+
+Run integration-style HTTP tests only:
+
+```bash
+make test-integration
+```
+
+You can also run raw Go commands:
+
+```bash
+go test ./...
+go test ./internal/...
+go test ./tests/...
+```
+
+## Notes
+
+- The in-memory repositories are built only for tests and exist to reduce setup cost while preserving realistic request flows.
+- The business-critical assertions prioritize balance correctness, idempotency correctness, and authorization behavior over broad but shallow endpoint coverage.
