@@ -60,12 +60,12 @@ The Postgres-backed suite verifies behaviors that the in-memory test double cann
 - `LockByIDs` returns a deterministic order suitable for deadlock reduction
 - transfer updates remain atomic against a real PostgreSQL database
 - failed transfers roll back balances, transactions, and ledger writes
-- concurrent top ups using the same idempotency key create only one transaction and one ledger entry
-- concurrent transfers using the same idempotency key create only one transaction and two ledger entries
-- duplicate concurrent requests do not mutate balances twice
-- competing transfers on the same wallet serialize correctly and leave exactly one successful mutation when funds are insufficient for both
+- higher-fanout concurrent top ups using the same idempotency key create only one transaction and one ledger entry
+- higher-fanout concurrent transfers using the same idempotency key create only one transaction and two ledger entries
+- repeated duplicate concurrent requests do not mutate balances twice
+- higher-fanout competing transfers on the same wallet serialize correctly and only spend available balance
 - reciprocal transfers complete successfully under real row locking
-- reconciliation logic can detect wallet drift, orphan ledger entries, and broken transaction ledger shapes
+- reconciliation logic can detect wallet drift, orphan ledger entries, corrupted first ledger entries, broken transaction ledger shapes, and transaction/ledger amount mismatches
 
 ## Critical Flows Covered
 
@@ -81,11 +81,14 @@ The most important trust-sensitive flows are intentionally tested from multiple 
   replay behavior with same payload
   conflict behavior with different payload
   assertions that balance, transactions, and ledger counts do not change twice
-  Postgres-backed proof that concurrent retries with the same key still mutate state only once
+  PostgreSQL-backed checks that higher-fanout concurrent retries with the same key still mutate state only once
 - concurrency:
-  Postgres-backed proof that same-wallet contention does not overdraw balances
-  rollback proof that failed contenders do not leave partial transactions or partial ledger writes
-  reciprocal transfer proof under real row locking
+  PostgreSQL-backed checks that same-wallet contention does not overdraw balances
+  rollback checks that failed contenders do not leave partial transactions or partial ledger writes
+  reciprocal transfer checks under real row locking
+- reconciliation:
+  in-memory coverage for checker behavior and issue reporting
+  PostgreSQL-backed corrupted-state coverage for genesis mismatches, orphan ledger entries, missing transfer legs, transaction amount mismatches, and wallet balance drift
 - webhooks:
   delivery record creation after successful balance mutation
   retry and eventual success behavior for outbound callback processing
@@ -108,7 +111,8 @@ Tradeoffs:
 - these tests do not validate real PostgreSQL behavior such as row locking semantics, SQL constraints, or migration compatibility
 - GORM-specific query behavior is not deeply exercised by the test suite
 - the Postgres-backed integration suite is opt-in through `TEST_DATABASE_DSN` to keep local setup lightweight
-- the strongest concurrency guarantees in this repository are intentionally proven only in the Postgres-backed suite because they depend on real transaction and lock behavior
+- the strongest concurrency guarantees in this repository are exercised only in the Postgres-backed suite because they depend on real transaction and lock behavior
+- some reconciliation corruption tests intentionally bypass constraints in the test harness so the checker can be validated against impossible-but-persisted states
 
 ## What Remains Untested
 

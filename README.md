@@ -380,7 +380,7 @@ The test strategy is layered:
 - unit tests for use cases and core business rules
 - integration-style HTTP tests using in-memory repositories
 - Postgres-backed integration tests for locking, transactionality, and migration compatibility
-- reconciliation-focused tests for wallet drift and ledger/transaction invariant violations
+- reconciliation-focused tests for wallet drift and ledger/transaction invariant violations, including explicit corrupted-state cases against PostgreSQL
 
 Common commands:
 
@@ -410,7 +410,7 @@ More detail: [docs/testing.md](docs/testing.md)
 - Idempotency is enforced with `(idempotency_key, user_id, endpoint)` uniqueness plus payload hashing
 - Webhook delivery is decoupled from the request critical path
 - Database constraints backstop core domain invariants, not just application code
-- Reconciliation can prove wallet, ledger, and transaction invariants from persisted state
+- Reconciliation checks wallet, ledger, and transaction consistency from persisted state under explicit model assumptions
 - Redis is used for practical cross-instance rate limiting
 - Admin seeding is transactional to avoid partial bootstrap state
 
