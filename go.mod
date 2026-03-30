@@ -62,6 +62,7 @@ require (
 
 replace (
 	github.com/klauspost/compress => github.com/klauspost/compress v1.17.9
+	github.com/prometheus/client_model => github.com/prometheus/client_model v0.6.1
 	golang.org/x/crypto => golang.org/x/crypto v0.31.0
 	golang.org/x/net => golang.org/x/net v0.33.0
 	golang.org/x/sync => golang.org/x/sync v0.10.0

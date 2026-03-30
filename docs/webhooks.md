@@ -140,4 +140,4 @@ Suggested local flow:
 
 - the worker is process-local, not horizontally coordinated
 - the retry strategy is intentionally simple and not a full job scheduler
-- repository-level integration tests against real Postgres still remain a useful next step
+- end-to-end webhook delivery against an external stub in CI would still be a useful next step
