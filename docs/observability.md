@@ -34,6 +34,12 @@ The API exposes:
 
 The endpoint is Prometheus-friendly and can be scraped locally or in CI smoke checks.
 
+Protection defaults:
+
+- in development, `/metrics` is open unless `METRICS_TOKEN` is set
+- outside development, startup fails if metrics stay enabled without `METRICS_TOKEN`
+- when `METRICS_TOKEN` is set, send it as `Authorization: Bearer <token>` or `X-Metrics-Token: <token>`
+
 It can be disabled with:
 
 ```env
@@ -68,6 +74,8 @@ Useful checks:
 - verify login traffic increments HTTP counters
 - trigger repeated login failures and watch rate-limit counters
 - run a top up or transfer with webhooks enabled and watch webhook lifecycle counters move
+
+If you want to keep development closer to production, set `METRICS_TOKEN` locally and scrape with that token instead of relying on the open development default.
 
 ## Scope And Tradeoffs
 

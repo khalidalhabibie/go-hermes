@@ -128,6 +128,18 @@ Run all tests:
 make test
 ```
 
+Run the race detector across the full suite:
+
+```bash
+make test-race
+```
+
+Run the configured linter:
+
+```bash
+make lint
+```
+
 Run unit tests only:
 
 ```bash
@@ -151,6 +163,7 @@ You can also run raw Go commands:
 
 ```bash
 go test ./...
+go test -race ./...
 go test ./internal/...
 go test ./tests/...
 ```

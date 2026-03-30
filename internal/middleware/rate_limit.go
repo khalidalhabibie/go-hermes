@@ -10,9 +10,12 @@ import (
 	"go-hermes/internal/pkg/ratelimit"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog"
 )
 
-func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Duration, collector *metrics.Collector) fiber.Handler {
+const rateLimitFailurePolicy = "fail_open"
+
+func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Duration, collector *metrics.Collector, log zerolog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if limiter == nil || limit <= 0 {
 			return c.Next()
@@ -25,6 +28,11 @@ func RateLimit(name string, limiter ratelimit.Limiter, limit int, window time.Du
 
 		result, err := limiter.Allow(context.Background(), fmt.Sprintf("%s:%s", name, identifier), limit, window)
 		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("scope", name).
+				Str("failure_policy", rateLimitFailurePolicy).
+				Msg("rate limiter backend unavailable; allowing request")
 			return c.Next()
 		}
 
