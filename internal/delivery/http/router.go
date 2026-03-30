@@ -30,15 +30,30 @@ type RouteMiddleware struct {
 	Transfer fiber.Handler
 }
 
-func RegisterRoutes(app *fiber.App, handlers Handlers, jwtManager *auth.JWTManager, requestLogger fiber.Handler, routeMiddleware RouteMiddleware, docsEnabled bool) {
+type Instrumentation struct {
+	TraceContext    fiber.Handler
+	Metrics         fiber.Handler
+	MetricsEndpoint fiber.Handler
+}
+
+func RegisterRoutes(app *fiber.App, handlers Handlers, jwtManager *auth.JWTManager, requestLogger fiber.Handler, routeMiddleware RouteMiddleware, instrumentation Instrumentation, docsEnabled bool) {
 	app.Use(fiberrequestid.New(fiberrequestid.Config{
 		Header:     requestid.HeaderName,
 		ContextKey: "requestid",
 	}))
+	if instrumentation.TraceContext != nil {
+		app.Use(instrumentation.TraceContext)
+	}
 	app.Use(fiberrecover.New())
+	if instrumentation.Metrics != nil {
+		app.Use(instrumentation.Metrics)
+	}
 	app.Use(requestLogger)
 
 	app.Get("/health", handlers.Health.Check)
+	if instrumentation.MetricsEndpoint != nil {
+		app.Get("/metrics", instrumentation.MetricsEndpoint)
+	}
 
 	if docsEnabled {
 		app.Get("/swagger", func(c *fiber.Ctx) error {

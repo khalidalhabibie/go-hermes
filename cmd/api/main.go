@@ -18,6 +18,7 @@ import (
 	"go-hermes/internal/pkg/database"
 	"go-hermes/internal/pkg/hash"
 	"go-hermes/internal/pkg/logger"
+	"go-hermes/internal/pkg/metrics"
 	"go-hermes/internal/pkg/ratelimit"
 	redisclient "go-hermes/internal/pkg/redis"
 	"go-hermes/internal/pkg/validator"
@@ -53,25 +54,34 @@ func main() {
 	}
 
 	redisLimiter := ratelimit.NewRedisLimiter(redis)
+	metricsCollector := metrics.NewCollector()
 
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.ExpiryMinutes)
 	requestValidator := validator.New()
-	webhookService := usecase.NewWebhookService(cfg.Webhook, webhookRepo, nil, log)
+	webhookService := usecase.NewWebhookService(cfg.Webhook, webhookRepo, nil, log, metricsCollector)
 
 	authUsecase := usecase.NewAuthUsecase(txManager, userRepo, walletRepo, auditRepo, jwtManager)
 	userUsecase := usecase.NewUserUsecase(userRepo)
 	walletUsecase := usecase.NewWalletUsecase(walletRepo)
 	transactionUsecase := usecase.NewTransactionUsecase(txManager, walletRepo, transactionRepo, ledgerRepo, idempotencyRepo, auditRepo, webhookService)
 	adminUsecase := usecase.NewAdminUsecase(auditRepo, transactionRepo, webhookRepo)
-	healthUsecase := usecase.NewHealthUsecase(healthRepo)
+	healthUsecase := usecase.NewHealthUsecase(repository.NewCompositeHealthRepository(healthRepo, repository.NewRedisHealthRepository(redis)))
 
-	if err := seedAdmin(context.Background(), cfg, userRepo, walletRepo, auditRepo); err != nil {
+	if err := seedAdmin(context.Background(), cfg, txManager, userRepo, walletRepo, auditRepo); err != nil {
 		log.Fatal().Err(err).Msg("failed to seed admin user")
 	}
 
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 	webhookService.Start(workerCtx)
+
+	instrumentation := httpdelivery.Instrumentation{
+		TraceContext: middleware.TraceContext(),
+	}
+	if cfg.Observability.MetricsEnabled {
+		instrumentation.Metrics = middleware.Metrics(metricsCollector)
+		instrumentation.MetricsEndpoint = metricsCollector.FiberHandler()
+	}
 
 	server := app.NewHTTPApp(cfg.App.Name, jwtManager, middleware.RequestLogger(log), httpdelivery.Handlers{
 		Auth:   handler.NewAuthHandler(authUsecase, requestValidator),
@@ -82,10 +92,10 @@ func main() {
 		Admin:  handler.NewAdminHandler(adminUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
-		Login:    middleware.RateLimit("login", redisLimiter, cfg.RateLimit.Login, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second),
-		TopUp:    middleware.RateLimit("topup", redisLimiter, cfg.RateLimit.TopUp, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second),
-		Transfer: middleware.RateLimit("transfer", redisLimiter, cfg.RateLimit.Transfer, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second),
-	}, cfg.Docs.Enabled)
+		Login:    middleware.RateLimit("login", redisLimiter, cfg.RateLimit.Login, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
+		TopUp:    middleware.RateLimit("topup", redisLimiter, cfg.RateLimit.TopUp, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
+		Transfer: middleware.RateLimit("transfer", redisLimiter, cfg.RateLimit.Transfer, time.Duration(cfg.RateLimit.WindowSeconds)*time.Second, metricsCollector),
+	}, instrumentation, cfg.Docs.Enabled)
 
 	go func() {
 		address := ":" + cfg.App.Port
@@ -103,53 +113,58 @@ func main() {
 	_ = server.ShutdownWithTimeout(10 * time.Second)
 }
 
-func seedAdmin(ctx context.Context, cfg config.Config, users repository.UserRepository, wallets repository.WalletRepository, audits repository.AuditLogRepository) error {
+func seedAdmin(ctx context.Context, cfg config.Config, txManager repository.TransactionManager, users repository.UserRepository, wallets repository.WalletRepository, audits repository.AuditLogRepository) error {
 	if !cfg.Seed.EnableAdminSeed || cfg.Seed.AdminEmail == "" || cfg.Seed.AdminPassword == "" {
 		return nil
 	}
 
-	existing, err := users.GetByEmail(ctx, cfg.Seed.AdminEmail)
-	if err == nil && existing != nil {
-		return nil
-	}
-	if err != nil && !repository.IsNotFound(err) {
-		return err
-	}
+	return txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		existing, err := users.GetByEmail(txCtx, cfg.Seed.AdminEmail)
+		if err == nil && existing != nil {
+			return nil
+		}
+		if err != nil && !repository.IsNotFound(err) {
+			return err
+		}
 
-	passwordHash, err := hash.Password(cfg.Seed.AdminPassword)
-	if err != nil {
-		return err
-	}
+		passwordHash, err := hash.Password(cfg.Seed.AdminPassword)
+		if err != nil {
+			return err
+		}
 
-	adminID := uuid.New()
-	admin := &entity.User{
-		ID:           adminID,
-		Name:         cfg.Seed.AdminName,
-		Email:        cfg.Seed.AdminEmail,
-		PasswordHash: passwordHash,
-		Role:         entity.RoleAdmin,
-	}
-	wallet := &entity.Wallet{
-		ID:      uuid.New(),
-		UserID:  adminID,
-		Balance: 0,
-		Status:  entity.WalletStatusActive,
-	}
-	if err := users.Create(ctx, admin); err != nil {
-		return err
-	}
-	if err := wallets.Create(ctx, wallet); err != nil {
-		return err
-	}
+		adminID := uuid.New()
+		admin := &entity.User{
+			ID:           adminID,
+			Name:         cfg.Seed.AdminName,
+			Email:        cfg.Seed.AdminEmail,
+			PasswordHash: passwordHash,
+			Role:         entity.RoleAdmin,
+		}
+		wallet := &entity.Wallet{
+			ID:      uuid.New(),
+			UserID:  adminID,
+			Balance: 0,
+			Status:  entity.WalletStatusActive,
+		}
+		if err := users.Create(txCtx, admin); err != nil {
+			if repository.IsUniqueViolation(err) {
+				return nil
+			}
+			return err
+		}
+		if err := wallets.Create(txCtx, wallet); err != nil {
+			return err
+		}
 
-	metadata, _ := json.Marshal(map[string]string{"email": admin.Email})
-	return audits.Create(ctx, &entity.AuditLog{
-		ID:          uuid.New(),
-		ActorUserID: &adminID,
-		Action:      "ADMIN_SEEDED",
-		EntityType:  "user",
-		EntityID:    &adminID,
-		Metadata:    datatypes.JSON(metadata),
-		CreatedAt:   time.Now(),
+		metadata, _ := json.Marshal(map[string]string{"email": admin.Email})
+		return audits.Create(txCtx, &entity.AuditLog{
+			ID:          uuid.New(),
+			ActorUserID: &adminID,
+			Action:      "ADMIN_SEEDED",
+			EntityType:  "user",
+			EntityID:    &adminID,
+			Metadata:    datatypes.JSON(metadata),
+			CreatedAt:   time.Now(),
+		})
 	})
 }

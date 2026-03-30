@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	App       AppConfig
-	DB        DBConfig
-	Redis     RedisConfig
-	RateLimit RateLimitConfig
-	JWT       JWTConfig
-	Seed      SeedConfig
-	Docs      DocsConfig
-	Webhook   WebhookConfig
+	App           AppConfig
+	DB            DBConfig
+	Redis         RedisConfig
+	RateLimit     RateLimitConfig
+	JWT           JWTConfig
+	Seed          SeedConfig
+	Docs          DocsConfig
+	Observability ObservabilityConfig
+	Webhook       WebhookConfig
 }
 
 type AppConfig struct {
@@ -66,6 +67,10 @@ type SeedConfig struct {
 
 type DocsConfig struct {
 	Enabled bool
+}
+
+type ObservabilityConfig struct {
+	MetricsEnabled bool
 }
 
 type WebhookConfig struct {
@@ -121,6 +126,9 @@ func Load() Config {
 		},
 		Docs: DocsConfig{
 			Enabled: getEnvAsBool("DOCS_ENABLED", true),
+		},
+		Observability: ObservabilityConfig{
+			MetricsEnabled: getEnvAsBool("METRICS_ENABLED", true),
 		},
 		Webhook: WebhookConfig{
 			Enabled:              getEnvAsBool("WEBHOOK_ENABLED", false),

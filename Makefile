@@ -1,6 +1,6 @@
 APP_NAME=go-hermes
 
-.PHONY: run test test-unit test-integration tidy migrate-up migrate-down
+.PHONY: run test test-unit test-integration test-postgres-integration tidy migrate-up migrate-down
 
 run:
 	go run ./cmd/api
@@ -13,6 +13,9 @@ test-unit:
 
 test-integration:
 	go test ./tests/...
+
+test-postgres-integration:
+	go test ./tests/... -run Postgres
 
 tidy:
 	go mod tidy

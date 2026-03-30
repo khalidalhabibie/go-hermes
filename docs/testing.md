@@ -8,6 +8,7 @@ There are two main categories of automated tests:
 
 - Unit tests for use cases and business rules
 - Integration-style HTTP tests that exercise routing, middleware, validation, auth, and handlers end-to-end using an isolated in-memory repository layer
+- Postgres-backed integration tests for transactionality, lock ordering, and migration compatibility
 
 ## What Is Covered
 
@@ -50,6 +51,16 @@ The HTTP tests exercise the application as a running API:
 - forbidden admin access for normal users
 - resource isolation for transaction detail access
 
+### Postgres Integration Tests
+
+The Postgres-backed suite verifies behaviors that the in-memory test double cannot prove:
+
+- migrations apply cleanly to a fresh schema
+- `LockByIDs` returns a deterministic order suitable for deadlock reduction
+- transfer updates remain atomic against a real PostgreSQL database
+- failed transfers roll back balances, transactions, and ledger writes
+- reciprocal transfers complete successfully under real row locking
+
 ## Critical Flows Covered
 
 The most important trust-sensitive flows are intentionally tested from multiple angles:
@@ -72,7 +83,7 @@ The most important trust-sensitive flows are intentionally tested from multiple 
 
 ## Test Approach And Tradeoffs
 
-The integration-style tests use an in-memory repository implementation instead of a real Postgres database.
+The default integration-style tests use an in-memory repository implementation instead of a real Postgres database.
 
 This choice keeps tests:
 
@@ -85,17 +96,16 @@ Tradeoffs:
 
 - these tests do not validate real PostgreSQL behavior such as row locking semantics, SQL constraints, or migration compatibility
 - GORM-specific query behavior is not deeply exercised by the test suite
-- a future improvement would be to add a dedicated Postgres-backed integration suite for repository and migration verification
+- the Postgres-backed integration suite is opt-in through `TEST_DATABASE_DSN` to keep local setup lightweight
 
 ## What Remains Untested
 
 The following areas still deserve deeper coverage in a larger production system:
 
-- repository integration tests against real PostgreSQL
-- migration smoke tests in CI
-- concurrency tests around transfer contention and row locking
 - admin endpoint positive-path authorization tests
 - failure-path tests for audit log persistence and partial infrastructure failures
+- chaos-style tests for Redis outages during rate limit checks
+- end-to-end webhook delivery against a real downstream stub in CI
 
 ## Running Tests Locally
 
@@ -117,6 +127,13 @@ Run integration-style HTTP tests only:
 make test-integration
 ```
 
+Run only Postgres-backed integration tests:
+
+```bash
+export TEST_DATABASE_DSN='host=localhost port=5432 user=postgres password=postgres dbname=go_hermes sslmode=disable TimeZone=UTC'
+make test-postgres-integration
+```
+
 You can also run raw Go commands:
 
 ```bash
@@ -124,6 +141,8 @@ go test ./...
 go test ./internal/...
 go test ./tests/...
 ```
+
+The Postgres-backed tests automatically skip when `TEST_DATABASE_DSN` is not set.
 
 ## Notes
 

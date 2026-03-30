@@ -14,6 +14,7 @@ import (
 	"go-hermes/internal/middleware"
 	"go-hermes/internal/pkg/auth"
 	"go-hermes/internal/pkg/logger"
+	"go-hermes/internal/pkg/metrics"
 	"go-hermes/internal/pkg/ratelimit"
 	"go-hermes/internal/pkg/validator"
 	"go-hermes/internal/usecase"
@@ -99,6 +100,7 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 	jwtManager := auth.NewJWTManager("test-secret", "go-hermes-test", 60)
 	validate := validator.New()
 	testLogger := logger.New("test")
+	metricsCollector := metrics.NewCollector()
 
 	webhookService := usecase.NewWebhookService(config.WebhookConfig{
 		Enabled:              options.WebhookEnabled,
@@ -107,7 +109,7 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 		MaxRetry:             options.WebhookMaxRetry,
 		RetryIntervalSeconds: retryDelaySeconds(options.WebhookRetryDelay),
 		WorkerBatchSize:      20,
-	}, repos.Webhooks, options.WebhookHTTPClient, testLogger)
+	}, repos.Webhooks, options.WebhookHTTPClient, testLogger, metricsCollector)
 
 	authUsecase := usecase.NewAuthUsecase(repos.TxManager, repos.Users, repos.Wallets, repos.Audits, jwtManager)
 	userUsecase := usecase.NewUserUsecase(repos.Users)
@@ -125,9 +127,13 @@ func NewTestHarness(t *testing.T, opts ...HarnessOption) *TestHarness {
 		Admin:  handler.NewAdminHandler(adminUsecase),
 		Health: handler.NewHealthHandler(healthUsecase),
 	}, httpdelivery.RouteMiddleware{
-		Login:    middleware.RateLimit("login", ratelimit.NewMemoryLimiter(), options.LoginRateLimit, options.RateLimitWindow),
-		TopUp:    middleware.RateLimit("topup", ratelimit.NewMemoryLimiter(), options.TopUpRateLimit, options.RateLimitWindow),
-		Transfer: middleware.RateLimit("transfer", ratelimit.NewMemoryLimiter(), options.TransferRateLimit, options.RateLimitWindow),
+		Login:    middleware.RateLimit("login", ratelimit.NewMemoryLimiter(), options.LoginRateLimit, options.RateLimitWindow, metricsCollector),
+		TopUp:    middleware.RateLimit("topup", ratelimit.NewMemoryLimiter(), options.TopUpRateLimit, options.RateLimitWindow, metricsCollector),
+		Transfer: middleware.RateLimit("transfer", ratelimit.NewMemoryLimiter(), options.TransferRateLimit, options.RateLimitWindow, metricsCollector),
+	}, httpdelivery.Instrumentation{
+		TraceContext:    middleware.TraceContext(),
+		Metrics:         middleware.Metrics(metricsCollector),
+		MetricsEndpoint: metricsCollector.FiberHandler(),
 	}, false)
 
 	if options.WebhookEnabled && options.StartWebhookWorker {
